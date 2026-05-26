@@ -52,9 +52,6 @@ const ROWS = [
   { type: 'row', key: 'r_free_lessons',   top: false, f: and(loc(R), tfr(true),  act('LESSON')), label: '— Tuition Free — Lessons' },
   { type: 'row', key: 'r_free_group',     top: false, f: and(loc(R), tfr(true),  act('CLASS')),  label: '— Tuition Free — Group Classes' },
 
-  { type: 'section', label: 'Retention' },
-  { type: 'row', key: 'new',              top: true,  f: 'NEW',       label: 'New Students' },
-  { type: 'row', key: 'returning',        top: true,  f: 'RETURNING', label: 'Returning Students' },
 ]
 
 const DATA_ROWS = ROWS.filter(r => r.type === 'row')
@@ -303,28 +300,82 @@ function ReportTable({ reportData }) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default function Enrollment() {
-  const [allRecords, setAllRecords] = useState([])
-  const [loading, setLoading]       = useState(true)
-  const [error, setError]           = useState(null)
-  const [selected, setSelected]     = useState([])
+  // Lightweight global data for period pills + New/Returning computation
+  const [allCustomerPeriods, setAllCustomerPeriods] = useState([])
+  // Scoped enrollment data for the selected periods only
+  const [records, setRecords]             = useState([])
+  const [periodsLoading, setPeriodsLoading] = useState(true)
+  const [loading, setLoading]             = useState(false)
+  const [error, setError]                 = useState(null)
+  const [selected, setSelected]           = useState([])
 
-  useEffect(() => { loadAll() }, [])
+  // On mount: lightweight fetch — just enough to populate period pills and firstKey
+  useEffect(() => { loadPeriods() }, [])
 
-  async function loadAll() {
+  async function loadPeriods() {
     const PAGE = 1000
     let from = 0, all = []
     while (true) {
       const { data, error } = await supabase
         .from('enrollments')
-        .select('event_enrollment_id, customer_id, time_period, fiscal_year, is_tuition_free, events(location, activity_type)')
+        .select('customer_id, time_period, fiscal_year')
         .range(from, from + PAGE - 1)
+      if (error) { setError(error.message); setPeriodsLoading(false); return }
+      all = all.concat(data)
+      if (data.length < PAGE) break
+      from += PAGE
+    }
+    setAllCustomerPeriods(all.map(e => ({
+      cid:        e.customer_id,
+      timePeriod: e.time_period,
+      fiscalYear: e.fiscal_year,
+      qSortKey:   quarterSortKey(e.time_period),
+    })))
+    setPeriodsLoading(false)
+  }
+
+  // On period selection: fetch scoped enrollment data with events join
+  useEffect(() => {
+    if (selected.length === 0) {
+      setRecords([])
+      setError(null)
+      return
+    }
+    loadData(selected)
+  }, [selected])
+
+  async function loadData(selectedPeriods) {
+    setLoading(true)
+    setError(null)
+
+    const quarters = selectedPeriods.filter(p => p.type === 'quarter').map(p => p.value)
+    const fys      = selectedPeriods.filter(p => p.type === 'fiscal_year').map(p => p.value)
+
+    let query = supabase
+      .from('enrollments')
+      .select('event_enrollment_id, customer_id, time_period, fiscal_year, is_tuition_free, events(location, activity_type)')
+
+    if (quarters.length > 0 && fys.length > 0) {
+      const qList = quarters.map(q => `"${q}"`).join(',')
+      const fList = fys.map(f => `"${f}"`).join(',')
+      query = query.or(`time_period.in.(${qList}),fiscal_year.in.(${fList})`)
+    } else if (quarters.length > 0) {
+      query = query.in('time_period', quarters)
+    } else {
+      query = query.in('fiscal_year', fys)
+    }
+
+    const PAGE = 1000
+    let from = 0, all = []
+    while (true) {
+      const { data, error } = await query.range(from, from + PAGE - 1)
       if (error) { setError(error.message); setLoading(false); return }
       all = all.concat(data)
       if (data.length < PAGE) break
       from += PAGE
     }
 
-    const records = all.map(e => ({
+    setRecords(all.map(e => ({
       eid:           e.event_enrollment_id,
       cid:           e.customer_id,
       timePeriod:    e.time_period,
@@ -333,19 +384,14 @@ export default function Enrollment() {
       location:      e.events?.location?.trim() ?? null,
       activityType:  e.events?.activity_type ?? null,
       qSortKey:      quarterSortKey(e.time_period),
-    }))
-
-    const distinctLocations = [...new Set(records.map(r => r.location).filter(Boolean))].sort()
-    console.log('[CMC] Distinct location values in events:', distinctLocations)
-
-    setAllRecords(records)
+    })))
     setLoading(false)
   }
 
-  // Derive available periods from loaded data
+  // Derive period pills from lightweight global data
   const { fyPeriods, quarterGroups } = useMemo(() => {
     const qSet = new Set(), fySet = new Set()
-    for (const r of allRecords) {
+    for (const r of allCustomerPeriods) {
       if (r.timePeriod) qSet.add(r.timePeriod)
       if (r.fiscalYear) fySet.add(r.fiscalYear)
     }
@@ -354,7 +400,6 @@ export default function Enrollment() {
       .map(v => ({ type: 'fiscal_year', value: v }))
       .sort((a, b) => fySortKey(a.value) - fySortKey(b.value))
 
-    // Group quarters by FY label
     const byFY = {}
     for (const qv of qSet) {
       const q = parseQuarter(qv)
@@ -372,27 +417,26 @@ export default function Enrollment() {
       }))
 
     return { fyPeriods, quarterGroups }
-  }, [allRecords])
+  }, [allCustomerPeriods])
 
-  // Each customer's earliest quarter sort key (for New vs Returning)
+  // firstKey from global lightweight data so New/Returning is accurate across all time
   const firstKey = useMemo(() => {
     const map = {}
-    for (const r of allRecords) {
+    for (const r of allCustomerPeriods) {
       if (!r.cid || r.qSortKey === 99999) continue
       if (map[r.cid] === undefined || r.qSortKey < map[r.cid]) map[r.cid] = r.qSortKey
     }
     return map
-  }, [allRecords])
+  }, [allCustomerPeriods])
 
-  // Sort selected periods chronologically for column order
   const columns = useMemo(
     () => [...selected].sort((a, b) => periodSortKey(a) - periodSortKey(b)),
     [selected]
   )
 
   const reportData = useMemo(
-    () => buildReport(allRecords, columns, firstKey),
-    [allRecords, columns, firstKey]
+    () => buildReport(records, columns, firstKey),
+    [records, columns, firstKey]
   )
 
   function toggle(p) {
@@ -405,8 +449,8 @@ export default function Enrollment() {
   }
   const isSelected = p => selected.some(x => x.type === p.type && x.value === p.value)
 
-  if (loading) return <div className="page"><p className="coming-soon">Loading enrollment data…</p></div>
-  if (error)   return <div className="page"><div className="error-banner">{error}</div></div>
+  if (periodsLoading) return <div className="page"><p className="coming-soon">Loading…</p></div>
+  if (error && !loading) return <div className="page"><div className="error-banner">{error}</div></div>
 
   const hasData = fyPeriods.length > 0 || quarterGroups.length > 0
 
@@ -434,7 +478,11 @@ export default function Enrollment() {
             hasSelection={selected.length > 0}
           />
 
-          {columns.length === 0 ? (
+          {error && <div className="error-banner">{error}</div>}
+
+          {loading ? (
+            <p className="coming-soon">Loading enrollment data…</p>
+          ) : columns.length === 0 ? (
             <p className="coming-soon">Select one or more periods above to view the report.</p>
           ) : (
             <div className="report-scroll">

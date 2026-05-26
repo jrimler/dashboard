@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, Fragment } from 'react'
 import { supabase } from '../lib/supabase'
 import {
   parseQuarter, quarterFYLabel,
-  quarterSortKey, fySortKey, periodSortKey,
+  quarterSortKey, fySortKey,
   periodLabel,
 } from '../utils/periodUtils'
 
@@ -95,45 +95,39 @@ function PeriodSelector({ fyPeriods, quarterGroups, isSelected, toggle, onClear,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Build class list from flat enrollment records
+// Build class list from separate events + enrollments arrays
 // ─────────────────────────────────────────────────────────────────────────────
 
-function buildClassList(records, selectedPeriods) {
-  const classRecs = records.filter(r => r.activityType === 'CLASS')
-
-  const filtered = selectedPeriods.length === 0 ? classRecs : classRecs.filter(r =>
-    selectedPeriods.some(p =>
-      p.type === 'quarter' ? r.timePeriod === p.value : r.fiscalYear === p.value
-    )
-  )
-
+function buildClassList(eventsData, enrollmentsData) {
   const byEvent = {}
-  for (const r of filtered) {
-    if (!byEvent[r.eventId]) {
-      byEvent[r.eventId] = {
-        eventId:          r.eventId,
-        courseName:       r.courseName,
-        department:       r.department,
-        location:         r.location,
-        facility:         r.facility,
-        instructor:       r.instructor,
-        classStartDate:   r.classStartDate,
-        classEndDate:     r.classEndDate,
-        lessonDurationMin: r.lessonDurationMin,
-        allMeetings:      r.allMeetings,
-        eventFiscalYear:  r.eventFiscalYear,
-        eventTimePeriod:  r.eventTimePeriod,
-        enrollments:      [],
-      }
+  for (const ev of eventsData) {
+    byEvent[ev.event_id] = {
+      eventId:           ev.event_id,
+      courseName:        ev.course_name,
+      department:        ev.department,
+      location:          ev.location?.trim() ?? null,
+      facility:          ev.facility,
+      instructor:        ev.primary_instructor,
+      classStartDate:    ev.class_start_date,
+      classEndDate:      ev.class_end_date,
+      lessonDurationMin: ev.lesson_duration_minutes,
+      allMeetings:       ev.all_meetings,
+      eventFiscalYear:   ev.fiscal_year,
+      eventTimePeriod:   ev.time_period,
+      enrollments:       [],
     }
-    byEvent[r.eventId].enrollments.push({
-      eid:          r.eid,
-      cid:          r.cid,
-      firstName:    r.firstName,
-      lastName:     r.lastName,
-      amount:       r.amount,
-      discountType: r.discountType,
-      isTuitionFree: r.isTuitionFree,
+  }
+
+  for (const e of enrollmentsData) {
+    if (!byEvent[e.event_id]) continue
+    byEvent[e.event_id].enrollments.push({
+      eid:          e.event_enrollment_id,
+      cid:          e.customer_id,
+      firstName:    e.students?.first_name ?? null,
+      lastName:     e.students?.last_name  ?? null,
+      amount:       e.amount,
+      discountType: e.discount_type,
+      isTuitionFree: e.is_tuition_free,
     })
   }
 
@@ -313,75 +307,110 @@ function DrilldownRow({ cls, colCount }) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default function Classes() {
-  const [allRecords, setAllRecords] = useState([])
-  const [loading, setLoading]       = useState(true)
-  const [error, setError]           = useState(null)
-  const [selected, setSelected]     = useState([])
-  const [tuitFilter, setTuitFilter] = useState({ free: true, fee: true })
-  const [sortCol, setSortCol]       = useState('courseName')
-  const [sortDir, setSortDir]       = useState('asc')
-  const [expandedId, setExpandedId] = useState(null)
+  const [availableEvents, setAvailableEvents] = useState([])  // lightweight: just for period pills
+  const [classes, setClasses]                 = useState([])
+  const [periodsLoading, setPeriodsLoading]   = useState(true)
+  const [loading, setLoading]                 = useState(false)
+  const [error, setError]                     = useState(null)
+  const [selected, setSelected]               = useState([])
+  const [tuitFilter, setTuitFilter]           = useState({ free: true, fee: true })
+  const [sortCol, setSortCol]                 = useState('courseName')
+  const [sortDir, setSortDir]                 = useState('asc')
+  const [expandedId, setExpandedId]           = useState(null)
 
-  useEffect(() => { loadAll() }, [])
+  // On mount: lightweight fetch to populate period pills only
+  useEffect(() => { loadPeriods() }, [])
 
-  async function loadAll() {
+  async function loadPeriods() {
     const PAGE = 1000
     let from = 0, all = []
     while (true) {
       const { data, error } = await supabase
-        .from('enrollments')
-        .select(`
-          event_enrollment_id, event_id, customer_id,
-          is_tuition_free, amount, discount_type,
-          time_period, fiscal_year,
-          events(
-            course_name, department, activity_type, location, facility,
-            primary_instructor, class_start_date, class_end_date,
-            lesson_duration_minutes, all_meetings, fiscal_year, time_period
-          ),
-          students(first_name, last_name)
-        `)
+        .from('events')
+        .select('event_id, time_period, fiscal_year')
+        .eq('activity_type', 'CLASS')
         .range(from, from + PAGE - 1)
-      if (error) { setError(error.message); setLoading(false); return }
+      if (error) { setError(error.message); setPeriodsLoading(false); return }
       all = all.concat(data)
       if (data.length < PAGE) break
       from += PAGE
     }
+    setAvailableEvents(all)
+    setPeriodsLoading(false)
+  }
 
-    setAllRecords(all.map(e => ({
-      eid:            e.event_enrollment_id,
-      eventId:        e.event_id,
-      cid:            e.customer_id,
-      isTuitionFree:  e.is_tuition_free,
-      amount:         e.amount,
-      discountType:   e.discount_type,
-      timePeriod:     e.time_period,
-      fiscalYear:     e.fiscal_year,
-      activityType:   e.events?.activity_type    ?? null,
-      courseName:     e.events?.course_name      ?? null,
-      department:     e.events?.department       ?? null,
-      location:       e.events?.location?.trim() ?? null,
-      facility:       e.events?.facility         ?? null,
-      instructor:     e.events?.primary_instructor ?? null,
-      classStartDate: e.events?.class_start_date ?? null,
-      classEndDate:   e.events?.class_end_date   ?? null,
-      lessonDurationMin: e.events?.lesson_duration_minutes ?? null,
-      allMeetings:    e.events?.all_meetings     ?? null,
-      eventFiscalYear: e.events?.fiscal_year     ?? null,
-      eventTimePeriod: e.events?.time_period     ?? null,
-      firstName:      e.students?.first_name     ?? null,
-      lastName:       e.students?.last_name      ?? null,
-    })))
+  // On period selection: fetch scoped events then scoped enrollments
+  useEffect(() => {
+    if (selected.length === 0) {
+      setClasses([])
+      setError(null)
+      return
+    }
+    loadData(selected)
+  }, [selected])
+
+  async function loadData(selectedPeriods) {
+    setLoading(true)
+    setError(null)
+
+    const quarters = selectedPeriods.filter(p => p.type === 'quarter').map(p => p.value)
+    const fys      = selectedPeriods.filter(p => p.type === 'fiscal_year').map(p => p.value)
+
+    // Fetch CLASS events filtered server-side by selected periods
+    let eventsQuery = supabase
+      .from('events')
+      .select(`
+        event_id, course_name, department, location, facility,
+        primary_instructor, class_start_date, class_end_date,
+        lesson_duration_minutes, all_meetings, fiscal_year, time_period
+      `)
+      .eq('activity_type', 'CLASS')
+
+    if (quarters.length > 0 && fys.length > 0) {
+      const qList = quarters.map(q => `"${q}"`).join(',')
+      const fList = fys.map(f => `"${f}"`).join(',')
+      eventsQuery = eventsQuery.or(`time_period.in.(${qList}),fiscal_year.in.(${fList})`)
+    } else if (quarters.length > 0) {
+      eventsQuery = eventsQuery.in('time_period', quarters)
+    } else {
+      eventsQuery = eventsQuery.in('fiscal_year', fys)
+    }
+
+    const { data: eventsData, error: eventsError } = await eventsQuery
+    if (eventsError) { setError(eventsError.message); setLoading(false); return }
+
+    const eventIds = eventsData.map(e => e.event_id)
+    if (eventIds.length === 0) {
+      setClasses([])
+      setLoading(false)
+      return
+    }
+
+    // Fetch enrollments scoped to those event IDs only
+    const PAGE = 1000
+    let from = 0, allEnrollments = []
+    while (true) {
+      const { data, error } = await supabase
+        .from('enrollments')
+        .select('event_enrollment_id, event_id, customer_id, is_tuition_free, amount, discount_type, students(first_name, last_name)')
+        .in('event_id', eventIds)
+        .range(from, from + PAGE - 1)
+      if (error) { setError(error.message); setLoading(false); return }
+      allEnrollments = allEnrollments.concat(data)
+      if (data.length < PAGE) break
+      from += PAGE
+    }
+
+    setClasses(buildClassList(eventsData, allEnrollments))
     setLoading(false)
   }
 
-  // Derive periods from CLASS enrollments only
+  // Derive period pills from lightweight availableEvents
   const { fyPeriods, quarterGroups } = useMemo(() => {
-    const classRecs = allRecords.filter(r => r.activityType === 'CLASS')
     const qSet = new Set(), fySet = new Set()
-    for (const r of classRecs) {
-      if (r.timePeriod) qSet.add(r.timePeriod)
-      if (r.fiscalYear) fySet.add(r.fiscalYear)
+    for (const e of availableEvents) {
+      if (e.time_period) qSet.add(e.time_period)
+      if (e.fiscal_year) fySet.add(e.fiscal_year)
     }
     const fyPeriods = [...fySet]
       .map(v => ({ type: 'fiscal_year', value: v }))
@@ -401,24 +430,14 @@ export default function Classes() {
         quarters: quarters.sort((a, b) => quarterSortKey(a.value) - quarterSortKey(b.value)),
       }))
     return { fyPeriods, quarterGroups }
-  }, [allRecords])
-
-  const columns = useMemo(
-    () => [...selected].sort((a, b) => periodSortKey(a) - periodSortKey(b)),
-    [selected]
-  )
-
-  const allClasses = useMemo(
-    () => buildClassList(allRecords, columns),
-    [allRecords, columns]
-  )
+  }, [availableEvents])
 
   const visibleClasses = useMemo(() => {
-    let cls = allClasses
+    let cls = classes
     if (!tuitFilter.free) cls = cls.filter(c => !c.isTuitionFree)
     if (!tuitFilter.fee)  cls = cls.filter(c =>  c.isTuitionFree)
     return sortClasses(cls, sortCol, sortDir)
-  }, [allClasses, tuitFilter, sortCol, sortDir])
+  }, [classes, tuitFilter, sortCol, sortDir])
 
   function togglePeriod(p) {
     setSelected(prev => {
@@ -441,8 +460,8 @@ export default function Classes() {
   const totalFree     = visibleClasses.reduce((s, c) => s + c.tuitFreeCount, 0)
   const COL_COUNT     = 9
 
-  if (loading) return <div className="page"><p className="coming-soon">Loading class data…</p></div>
-  if (error)   return <div className="page"><div className="error-banner">{error}</div></div>
+  if (periodsLoading) return <div className="page"><p className="coming-soon">Loading…</p></div>
+  if (error && !loading) return <div className="page"><div className="error-banner">{error}</div></div>
 
   const hasData = fyPeriods.length > 0 || quarterGroups.length > 0
 
@@ -485,7 +504,13 @@ export default function Classes() {
             </button>
           </div>
 
-          {visibleClasses.length === 0 ? (
+          {error && <div className="error-banner">{error}</div>}
+
+          {loading ? (
+            <p className="coming-soon">Loading classes…</p>
+          ) : selected.length === 0 ? (
+            <p className="coming-soon">Select one or more periods above to view classes.</p>
+          ) : visibleClasses.length === 0 ? (
             <p className="coming-soon">No classes match the current filters.</p>
           ) : (
             <div className="report-scroll">
