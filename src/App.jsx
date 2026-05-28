@@ -1,9 +1,10 @@
 import { NavLink, Routes, Route, Navigate } from 'react-router-dom'
-import Upload     from './pages/Upload'
-import Enrollment from './pages/Enrollment'
-import Students   from './pages/Students'
-import Retention  from './pages/Retention'
-import Classes    from './pages/Classes'
+import Upload               from './pages/Upload'
+import Enrollment           from './pages/Enrollment'
+import Students             from './pages/Students'
+import Retention            from './pages/Retention'
+import Classes              from './pages/Classes'
+import SpecializedReporting from './pages/SpecializedReporting'
 
 const NAV_ITEMS = [
   { to: '/upload',     label: 'Upload'     },
@@ -11,6 +12,7 @@ const NAV_ITEMS = [
   { to: '/students',   label: 'Students'   },
   { to: '/retention',  label: 'Retention'  },
   { to: '/classes',    label: 'Classes'    },
+  { to: '/reports',    label: 'Reports'    },
 ]
 
 export default function App() {
@@ -42,6 +44,7 @@ export default function App() {
           <Route path="/students"   element={<Students />} />
           <Route path="/retention"  element={<Retention />} />
           <Route path="/classes"    element={<Classes />} />
+          <Route path="/reports"    element={<SpecializedReporting />} />
         </Routes>
       </main>
     </div>

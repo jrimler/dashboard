@@ -1,0 +1,45 @@
+import { useState } from 'react'
+import PianoInspiresGrant from '../reports/PianoInspiresGrant'
+
+const REPORTS = [
+  {
+    id:          'piano-inspires',
+    label:       'Piano Inspires Grant',
+    description: 'Unique piano/keyboard students and tuition assistance for grant reporting.',
+    component:   PianoInspiresGrant,
+  },
+]
+
+export default function SpecializedReporting() {
+  const [activeId, setActiveId] = useState(null)
+
+  const active = REPORTS.find(r => r.id === activeId) ?? null
+
+  return (
+    <div className="page sr-page">
+      <div className="enroll-header">
+        <h1>Specialized Reporting</h1>
+      </div>
+
+      <div className="sr-report-list">
+        {REPORTS.map(r => (
+          <button
+            key={r.id}
+            className={`sr-report-btn${activeId === r.id ? ' active' : ''}`}
+            onClick={() => setActiveId(prev => prev === r.id ? null : r.id)}
+          >
+            <span className="sr-report-btn-label">{r.label}</span>
+            <span className="sr-report-btn-desc">{r.description}</span>
+          </button>
+        ))}
+      </div>
+
+      {active && (
+        <div className="sr-report-body">
+          <div className="sr-report-body-title">{active.label}</div>
+          <active.component />
+        </div>
+      )}
+    </div>
+  )
+}

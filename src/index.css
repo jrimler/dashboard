@@ -611,3 +611,236 @@
     border-bottom: 1px solid var(--color-border);
   }
 }
+
+/* ── Specialized Reporting page ── */
+.sr-page { max-width: none; }
+
+.sr-report-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 28px;
+}
+
+.sr-report-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 14px 20px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  text-align: left;
+  transition: all .15s;
+  min-width: 220px;
+  box-shadow: var(--shadow);
+}
+.sr-report-btn:hover {
+  border-color: var(--color-accent);
+  background: #f0fdf4;
+}
+.sr-report-btn.active {
+  border-color: var(--color-accent);
+  background: var(--color-accent-lt);
+}
+
+.sr-report-btn-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+.sr-report-btn.active .sr-report-btn-label { color: var(--color-accent); }
+
+.sr-report-btn-desc {
+  font-size: 12px;
+  color: var(--color-muted);
+  line-height: 1.4;
+}
+
+.sr-report-body {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.sr-report-body-title {
+  padding: 16px 24px;
+  font-size: 16px;
+  font-weight: 700;
+  border-bottom: 1px solid var(--color-border);
+  background: #f8faf8;
+}
+
+.pig-report { padding: 24px; }
+
+/* ── Piano Inspires Grant — summary cards ── */
+.pig-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.pig-stat-card {
+  flex: 1;
+  min-width: 160px;
+  background: #f8faf8;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 20px 24px;
+}
+.pig-stat-card--accent {
+  background: var(--color-accent-lt);
+  border-color: #a8d5b5;
+}
+
+.pig-stat-value {
+  font-size: 32px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--color-text);
+  margin-bottom: 6px;
+  font-variant-numeric: tabular-nums;
+}
+.pig-stat-card--accent .pig-stat-value { color: var(--color-accent); }
+
+.pig-stat-label {
+  font-size: 12px;
+  color: var(--color-muted);
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+/* ── Methodology box ── */
+.pig-methodology {
+  background: #f8f8f6;
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-accent);
+  border-radius: var(--radius);
+  padding: 16px 20px;
+  margin-bottom: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pig-methodology-title {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: var(--color-accent);
+  margin-bottom: 2px;
+}
+
+.pig-methodology p {
+  font-size: 13px;
+  color: #44403c;
+  line-height: 1.6;
+}
+
+/* ── Course coverage ── */
+.pig-courses {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  margin-bottom: 24px;
+  overflow: hidden;
+}
+
+.pig-courses-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text);
+  text-align: left;
+  transition: background .15s;
+}
+.pig-courses-toggle:hover { background: #f0fdf4; }
+
+.pig-courses-preview { color: var(--color-muted); font-weight: 400; }
+.pig-courses-chevron { font-size: 10px; color: var(--color-muted); flex-shrink: 0; }
+
+.pig-courses-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 16px 16px;
+  border-top: 1px solid var(--color-border);
+  background: #fafaf8;
+}
+
+.pig-course-chip {
+  padding: 4px 10px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 20px;
+  font-size: 12px;
+  color: var(--color-text);
+}
+
+/* ── Roster header ── */
+.pig-roster-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.pig-roster-title {
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--color-muted);
+}
+
+/* ── Roster table ── */
+.pig-table {
+  border-collapse: collapse;
+  width: 100%;
+  min-width: 700px;
+  background: #fff;
+  font-size: 13px;
+}
+
+.pig-table thead tr { background: #1c3829; }
+
+.pig-table thead th {
+  padding: 10px 14px;
+  color: #d1fae5;
+  font-weight: 600;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.pig-table tbody td {
+  padding: 8px 14px;
+  border-bottom: 1px solid #f0eeec;
+  vertical-align: middle;
+}
+
+.pig-table tbody tr:nth-child(even) { background: #f9f9f8; }
+.pig-table tbody tr:hover { background: #f0fdf4; }
+
+.pig-num           { text-align: right; font-variant-numeric: tabular-nums; }
+.pig-mono          { font-family: 'Menlo', 'Monaco', monospace; color: var(--color-muted); font-size: 11px; }
+.pig-yes           { color: #166534; font-weight: 600; }
+.pig-courses-cell  { color: #44403c; font-size: 12px; }
+
+@media (max-width: 720px) {
+  .pig-summary { flex-direction: column; }
+  .sr-report-list { flex-direction: column; }
+  .sr-report-btn { min-width: 0; width: 100%; }
+}
