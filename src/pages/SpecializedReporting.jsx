@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import PianoInspiresGrant from '../reports/PianoInspiresGrant'
+import UniqueGroupClassesBoard from '../reports/UniqueGroupClassesBoard'
 
 const REPORTS = [
   {
@@ -7,6 +8,12 @@ const REPORTS = [
     label:       'Piano Inspires Grant',
     description: 'Unique piano/keyboard students and tuition assistance for grant reporting.',
     component:   PianoInspiresGrant,
+  },
+  {
+    id:          'unique-group-classes-board',
+    label:       'Unique Group Classes for Board',
+    description: 'Unique class instances (course + instructor) with age group and tuition status for board reporting.',
+    component:   UniqueGroupClassesBoard,
   },
 ]
 

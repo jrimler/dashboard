@@ -844,3 +844,55 @@
   .sr-report-list { flex-direction: column; }
   .sr-report-btn { min-width: 0; width: 100%; }
 }
+
+/* ── Unique Group Classes for Board report ── */
+.ugcb-table { min-width: 900px; }
+
+.ugcb-info-block { margin-bottom: 20px; }
+
+.ugcb-info-body {
+  border-top: 1px solid var(--color-border);
+  background: #fafaf8;
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 13px;
+  color: #44403c;
+  line-height: 1.6;
+}
+
+.ugcb-info-section-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: var(--color-accent);
+  margin-top: 4px;
+}
+.ugcb-info-section-title:first-child { margin-top: 0; }
+
+.ugcb-info-body code {
+  font-family: 'Menlo', 'Monaco', monospace;
+  font-size: 11px;
+  background: #f0eeec;
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+.ugcb-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.ugcb-badge--youth {
+  background: #dbeafe;
+  color: #1e40af;
+}
+.ugcb-badge--adult {
+  background: #f3f4f6;
+  color: #374151;
+}
