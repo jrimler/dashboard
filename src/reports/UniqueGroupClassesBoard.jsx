@@ -132,7 +132,7 @@ function PeriodSelector({ fyPeriods, quarterGroups, isSelected, toggle, onClear,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Data processing: collapse sections into unique instances
+// Data processing: one row per event_id
 // ─────────────────────────────────────────────────────────────────────────────
 
 function buildInstances(eventsData, enrollmentsData) {
@@ -144,55 +144,27 @@ function buildInstances(eventsData, enrollmentsData) {
     }
   }
 
-  // Group events by (course_name + instructor) — location is intentionally excluded
-  const byKey = {}
-  for (const ev of eventsData) {
-    const k = `${ev.course_name}|||${ev.primary_instructor}`
-    if (!byKey[k]) {
-      byKey[k] = {
-        courseName:  ev.course_name,
-        instructor:  ev.primary_instructor,
-        department:  ev.department,
-        sections:    [],
-        enrollments: [],
-      }
-    }
-    byKey[k].sections.push(ev)
-  }
-
-  // Map event_id → instance key so enrollments can be routed to the right instance
-  const eventToKey = {}
-  for (const ev of eventsData) {
-    eventToKey[ev.event_id] = `${ev.course_name}|||${ev.primary_instructor}`
-  }
+  // Group enrollments by event_id
+  const enrollmentsByEvent = {}
   for (const e of enrollmentsData) {
-    const k = eventToKey[e.event_id]
-    if (k && byKey[k]) byKey[k].enrollments.push(e)
+    if (!enrollmentsByEvent[e.event_id]) enrollmentsByEvent[e.event_id] = []
+    enrollmentsByEvent[e.event_id].push(e)
   }
 
-  return Object.values(byKey).map(({ courseName, instructor, department, sections, enrollments }) => {
+  return eventsData.map(ev => {
+    const enrollments = enrollmentsByEvent[ev.event_id] ?? []
+
     // Category: hardcoded override map first, then ASAP department (both trimmed)
-    const rawCategory = CATEGORY_MAP[courseName] ?? (department ?? '')
+    const rawCategory = CATEGORY_MAP[ev.course_name] ?? (ev.department ?? '')
     const category = rawCategory.trim() || '—'
 
-    // Earliest section start date across all sections of this instance (used for age calc)
-    const earliestStart = sections
-      .map(s => s.class_start_date)
-      .filter(Boolean)
-      .sort()[0] ?? null
-
-    // Number of distinct quarters this instance appeared in
-    const quartersOffered = new Set(sections.map(s => s.time_period).filter(Boolean)).size
-
     // Tuition-free: YMP prefix override OR every enrollment is free
-    const isYMP = (courseName ?? '').startsWith(YMP_PREFIX)
+    const isYMP = (ev.course_name ?? '').startsWith(YMP_PREFIX)
     const allFree = enrollments.length > 0 && enrollments.every(e => e.is_tuition_free)
     const isTuitionFree = isYMP || allFree
 
-    // Youth vs. Adult: check age of each unique enrolled student at earliestStart.
-    // Students with no birthdate are excluded from this check.
-    // If every student with a known birthdate is under 19, classify as Youth.
-    // If no birthdates are known at all, default to Adult (conservative fallback).
+    // Youth vs. Adult: age of each unique enrolled student at this event's start date.
+    // Students with no birthdate are excluded. Defaults to Adult if none are known.
     const seenCids = new Set()
     let hasAnyBirthdate = false
     let anyAdult = false
@@ -202,7 +174,7 @@ function buildInstances(eventsData, enrollmentsData) {
       const bd = studentBirthdates[e.customer_id]
       if (!bd) continue
       hasAnyBirthdate = true
-      const age = ageAtDate(bd, earliestStart)
+      const age = ageAtDate(bd, ev.class_start_date)
       if (age !== null && age >= 19) { anyAdult = true; break }
     }
     const ageGroup = (hasAnyBirthdate && !anyAdult) ? 'Youth' : 'Adult'
@@ -211,13 +183,13 @@ function buildInstances(eventsData, enrollmentsData) {
     const totalFree     = enrollments.filter(e => e.is_tuition_free).length
 
     return {
-      key: `${courseName}|||${instructor}`,
-      courseName,
+      key:          ev.event_id,
+      courseName:   ev.course_name,
       category,
-      instructor,
+      instructor:   ev.primary_instructor,
+      quarter:      ev.time_period,
       ageGroup,
       isTuitionFree,
-      quartersOffered,
       totalEnrolled,
       totalFree,
     }
@@ -237,7 +209,7 @@ function sortInstances(instances, col, dir) {
       case 'instructor':    va = a.instructor ?? '';        vb = b.instructor ?? '';        break
       case 'ageGroup':      va = a.ageGroup ?? '';          vb = b.ageGroup ?? '';          break
       case 'tuitStatus':    va = a.isTuitionFree ? 0 : 1;  vb = b.isTuitionFree ? 0 : 1;  break
-      case 'quarters':      va = a.quartersOffered;         vb = b.quartersOffered;         break
+      case 'quarter':       va = a.quarter ?? '';           vb = b.quarter ?? '';           break
       case 'totalEnrolled': va = a.totalEnrolled;           vb = b.totalEnrolled;           break
       case 'totalFree':     va = a.totalFree;               vb = b.totalFree;               break
       default: return 0
@@ -254,13 +226,13 @@ function sortInstances(instances, col, dir) {
 
 function exportCSV(instances) {
   const headers = [
-    'Course Name', 'Category', 'Instructor', 'Age Group', 'Tuition Status',
-    'Quarters Offered', 'Total Enrolled', 'Total Tuition Free',
+    'Course Name', 'Category', 'Instructor', 'Quarter', 'Age Group', 'Tuition Status',
+    'Total Enrolled', 'Total Tuition Free',
   ]
   const rows = instances.map(i => [
-    i.courseName, i.category, i.instructor, i.ageGroup,
-    i.isTuitionFree ? 'Tuition Free' : 'Fee Based',
-    i.quartersOffered, i.totalEnrolled, i.totalFree,
+    i.courseName, i.category, i.instructor, i.quarter ?? '',
+    i.ageGroup, i.isTuitionFree ? 'Tuition Free' : 'Fee Based',
+    i.totalEnrolled, i.totalFree,
   ])
   triggerDownload(
     [headers, ...rows].map(r => r.map(esc).join(',')).join('\n'),
@@ -450,24 +422,20 @@ export default function UniqueGroupClassesBoard() {
         </button>
         {infoOpen && (
           <div className="ugcb-info-body">
-            <div className="ugcb-info-section-title">Unique Class Instance</div>
+            <div className="ugcb-info-section-title">Rows</div>
             <p>
-              Each row represents a unique combination of <strong>course name + instructor</strong>.
-              Multiple sections of the same course taught by the same instructor — across different
-              quarters, times, or locations within the selected period — are collapsed into a single
-              row. <strong>Location is intentionally excluded from the uniqueness definition.</strong>{' '}
-              <em>Design note: this is a documented decision that may be revisited if
-              location-level granularity is needed in the future.</em>
+              Each row is one unique class offering, identified by its <strong>event_id</strong> from ASAP.
+              Quarter and Instructor are included so that duplicate-looking rows (same course name and
+              instructor across multiple quarters) can be identified and manually accounted for when needed.
             </p>
 
             <div className="ugcb-info-section-title">Youth vs. Adult</div>
             <p>
-              For each unique class instance, each enrolled student's age is calculated as of
-              the <strong>earliest section start date</strong> of that instance in the selected
-              period. Students with no birthdate on record are excluded from the age check.
-              If every student with a known birthdate is under 19 at that date, the instance is
-              classified as <strong>Youth</strong>; otherwise it is classified as <strong>Adult</strong>.
-              If no enrolled students have a birthdate on record, the instance defaults to Adult
+              Each enrolled student's age is calculated as of this event's <strong>class start date</strong>.
+              Students with no birthdate on record are excluded from the age check.
+              If every student with a known birthdate is under 19, the class is classified
+              as <strong>Youth</strong>; otherwise <strong>Adult</strong>.
+              If no enrolled students have a birthdate on record, the class defaults to Adult
               (conservative fallback).
             </p>
 
@@ -542,9 +510,9 @@ export default function UniqueGroupClassesBoard() {
                       <SortTh col="courseName"    label="Course Name"        sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
                       <SortTh col="category"      label="Category"           sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
                       <SortTh col="instructor"    label="Instructor"         sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
+                      <SortTh col="quarter"       label="Quarter"            sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
                       <SortTh col="ageGroup"      label="Age Group"          sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
                       <SortTh col="tuitStatus"    label="Tuition Status"     sortCol={sortCol} sortDir={sortDir} onSort={handleSort} />
-                      <SortTh col="quarters"      label="Qtrs Offered"       sortCol={sortCol} sortDir={sortDir} onSort={handleSort} align="right" />
                       <SortTh col="totalEnrolled" label="Total Enrolled"     sortCol={sortCol} sortDir={sortDir} onSort={handleSort} align="right" />
                       <SortTh col="totalFree"     label="Total Tuition Free" sortCol={sortCol} sortDir={sortDir} onSort={handleSort} align="right" />
                     </tr>
@@ -555,6 +523,7 @@ export default function UniqueGroupClassesBoard() {
                         <td className="cls-course">{inst.courseName ?? '—'}</td>
                         <td>{inst.category}</td>
                         <td>{inst.instructor ?? '—'}</td>
+                        <td className="cls-quarter">{inst.quarter ?? '—'}</td>
                         <td>
                           <span className={`ugcb-badge ugcb-badge--${inst.ageGroup.toLowerCase()}`}>
                             {inst.ageGroup}
@@ -565,7 +534,6 @@ export default function UniqueGroupClassesBoard() {
                             {inst.isTuitionFree ? 'Tuition Free' : 'Fee Based'}
                           </span>
                         </td>
-                        <td className="cls-num">{inst.quartersOffered}</td>
                         <td className="cls-num">{inst.totalEnrolled}</td>
                         <td className="cls-num">{inst.totalFree}</td>
                       </tr>
@@ -573,10 +541,9 @@ export default function UniqueGroupClassesBoard() {
                   </tbody>
                   <tfoot>
                     <tr className="cls-total-row">
-                      <td colSpan={5}>
+                      <td colSpan={6}>
                         {visibleInstances.length} instance{visibleInstances.length !== 1 ? 's' : ''}
                       </td>
-                      <td />
                       <td className="cls-num">{totalEnrolled}</td>
                       <td className="cls-num">{totalFree}</td>
                     </tr>
