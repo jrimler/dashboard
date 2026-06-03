@@ -12,7 +12,7 @@ const REPORTS = [
   {
     id:          'unique-group-classes-board',
     label:       'Unique Group Classes for Board',
-    description: 'Unique class instances (course + instructor) with age group and tuition status for board reporting.',
+    description: 'One row per group class offering with category, age group, and tuition status for board reporting.',
     component:   UniqueGroupClassesBoard,
   },
 ]
