@@ -157,6 +157,20 @@
 .file-btn:hover:not(.disabled) { background: var(--color-bg); }
 .file-btn.disabled { opacity: .5; cursor: not-allowed; }
 
+.report-link {
+  font-size: 12px;
+  color: var(--color-primary);
+  word-break: break-all;
+  margin-bottom: 4px;
+}
+
+.report-instructions {
+  font-size: 12px;
+  color: var(--color-muted);
+  margin: 0 0 8px;
+  line-height: 1.5;
+}
+
 .file-name {
   font-size: 13px;
   color: var(--color-muted);

@@ -56,6 +56,40 @@ function formatDate(val) {
 }
 
 // ---------------------------------------------------------------------------
+// Class schedule parsing
+// ---------------------------------------------------------------------------
+
+function parseIntOrNull(val) {
+  if (val === null || val === undefined || val === '') return null
+  const n = parseInt(val, 10)
+  return isNaN(n) ? null : n
+}
+
+async function parseClassSchedule(file) {
+  const rows = await parseFile(file)
+  const out = []
+  for (const row of rows) {
+    const eventId = String(row['Class ID'] ?? '').trim()
+    if (!eventId) continue
+    out.push({
+      event_id:     eventId,
+      facility:     row['Facility']     ?? null,
+      days_of_week: row['Days Of Week'] ?? null,
+      start_time:   row['Start Time']   ?? null,
+      end_time:     row['End Time']     ?? null,
+      age_min:      parseIntOrNull(row['Age Min']),
+      age_max:      parseIntOrNull(row['Age Max']),
+      course_id:    row['Course ID'] != null ? String(row['Course ID']) : null,
+    })
+  }
+  return out
+}
+
+async function upsertClassSchedule(rows, log) {
+  await upsertInBatches('class_schedule', rows, 'event_id', log)
+}
+
+// ---------------------------------------------------------------------------
 // Main export
 // ---------------------------------------------------------------------------
 
@@ -66,15 +100,17 @@ function formatDate(val) {
  * @param {File|null} superFile
  * @param {File|null} studentFile
  * @param {(msg: string) => void} log
+ * @param {File|null} classFile
  */
-export async function uploadReports(regularFile, superFile, studentFile, log) {
-  if (!regularFile && !superFile && !studentFile) {
+export async function uploadReports(regularFile, superFile, studentFile, log, classFile = null) {
+  if (!regularFile && !superFile && !studentFile && !classFile) {
     throw new Error('No files provided. Select at least one report to upload.')
   }
 
-  let regularRows = []
-  let superRows   = []
-  let studentRows = []
+  let regularRows      = []
+  let superRows        = []
+  let studentRows      = []
+  let classScheduleRows = []
 
   if (regularFile) {
     log('Parsing REGULAR report...')
@@ -90,6 +126,11 @@ export async function uploadReports(regularFile, superFile, studentFile, log) {
     log('Parsing STUDENT report...')
     studentRows = await parseFile(studentFile)
     log(`  ${studentRows.length} rows`)
+  }
+  if (classFile) {
+    log('Parsing CLASS SCHEDULE report...')
+    classScheduleRows = await parseClassSchedule(classFile)
+    log(`  ${classScheduleRows.length} rows`)
   }
 
   // -------------------------------------------------------------------------
@@ -209,7 +250,7 @@ export async function uploadReports(regularFile, superFile, studentFile, log) {
     if (skipped > 0) log(`WARNING: skipped ${skipped} enrollment(s) with no matching student record`)
   }
 
-  log(`Prepared: ${students.length} students, ${events.length} events, ${enrollments.length} enrollments`)
+  log(`Prepared: ${students.length} students, ${events.length} events, ${enrollments.length} enrollments, ${classScheduleRows.length} class schedule rows`)
 
   // -------------------------------------------------------------------------
   // Upsert — students and events must come before enrollments (FK order)
@@ -227,6 +268,11 @@ export async function uploadReports(regularFile, superFile, studentFile, log) {
   if (enrollments.length > 0) {
     log('Upserting enrollments...')
     await upsertInBatches('enrollments', enrollments, 'event_enrollment_id', log)
+  }
+
+  if (classScheduleRows.length > 0) {
+    log('Upserting class schedule...')
+    await upsertClassSchedule(classScheduleRows, log)
   }
 
   log('Upload complete.')

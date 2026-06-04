@@ -7,12 +7,12 @@ import Classes              from './pages/Classes'
 import SpecializedReporting from './pages/SpecializedReporting'
 
 const NAV_ITEMS = [
-  { to: '/upload',     label: 'Upload'     },
-  { to: '/enrollment', label: 'Enrollment' },
-  { to: '/students',   label: 'Students'   },
-  { to: '/retention',  label: 'Retention'  },
-  { to: '/classes',    label: 'Classes'    },
-  { to: '/reports',    label: 'Reports'    },
+  { to: '/reports',    label: 'Special Reports' },
+  { to: '/enrollment', label: 'Enrollment'      },
+  { to: '/retention',  label: 'Retention'       },
+  { to: '/classes',    label: 'Classes'         },
+  { to: '/students',   label: 'Students'        },
+  { to: '/upload',     label: 'Upload'          },
 ]
 
 export default function App() {

@@ -6,6 +6,7 @@ export default function Upload() {
   const [regularFile, setRegularFile]   = useState(null)
   const [superFile, setSuperFile]       = useState(null)
   const [studentFile, setStudentFile]   = useState(null)
+  const [classFile, setClassFile]       = useState(null)
   const [log, setLog]                   = useState([])
   const [uploading, setUploading]       = useState(false)
   const [testing, setTesting]           = useState(false)
@@ -50,7 +51,7 @@ export default function Upload() {
   }
 
   async function handleUpload() {
-    if (!regularFile && !superFile && !studentFile) {
+    if (!regularFile && !superFile && !studentFile && !classFile) {
       setError('Please select at least one file before uploading.')
       return
     }
@@ -60,7 +61,7 @@ export default function Upload() {
     setUploading(true)
 
     try {
-      await uploadReports(regularFile, superFile, studentFile, appendLog)
+      await uploadReports(regularFile, superFile, studentFile, appendLog, classFile)
       setDone(true)
     } catch (err) {
       setError(err.message)
@@ -74,27 +75,41 @@ export default function Upload() {
     <div className="page">
       <h1>Upload Reports</h1>
       <p className="subtitle">
-        Upload the three ASAP exports to refresh all dashboard data.
+        Upload the four ASAP exports to refresh all dashboard data.
         Files may be real XLSX or HTML-disguised-as-XLS.
       </p>
 
       <div className="upload-form">
-        <FileInput
-          label="REGULAR — Enrollment Report"
+        <ReportSection
+          label="Enrollment Report"
+          url="https://app.asapconnected.com/Reports/EnrollmentsReport.aspx"
+          instructions="Choose a wide range to capture all enrollments. Enrollment Status: Enrolled And Pending. Choose the latest time period. Everything else stays as-is."
           file={regularFile}
           onChange={setRegularFile}
           disabled={uploading}
         />
-        <FileInput
-          label="SUPER — Super Enrollment Report"
+        <ReportSection
+          label="Super Enrollment Report"
+          url="https://app.asapconnected.com/reports/SuperEnrollment.aspx?ReportID=30209"
+          instructions="Choose a wide range to capture all enrollments. Enrollment Status: Enrolled And Pending. Choose the latest time period. Everything else stays as-is."
           file={superFile}
           onChange={setSuperFile}
           disabled={uploading}
         />
-        <FileInput
-          label="STUDENT — Student Report"
+        <ReportSection
+          label="Student Report"
+          url="https://app.asapconnected.com/Reports/StudentReport.aspx"
+          instructions="Select Template: Age/Gender/Ethnicity. Status: Enrolled And Pending. Choose the latest time period. Everything else stays as-is."
           file={studentFile}
           onChange={setStudentFile}
+          disabled={uploading}
+        />
+        <ReportSection
+          label="Super Class Summary Report"
+          url="https://app.asapconnected.com/reports/CustomQuery.aspx?ReportID=29315"
+          instructions="Choose time period only."
+          file={classFile}
+          onChange={setClassFile}
           disabled={uploading}
         />
 
@@ -139,10 +154,12 @@ export default function Upload() {
   )
 }
 
-function FileInput({ label, file, onChange, disabled }) {
+function ReportSection({ label, url, instructions, file, onChange, disabled }) {
   return (
     <div className="file-input-group">
       <label className="file-label">{label}</label>
+      <a href={url} target="_blank" rel="noreferrer" className="report-link">{url}</a>
+      <p className="report-instructions">{instructions}</p>
       <div className="file-row">
         <label className={`file-btn ${disabled ? 'disabled' : ''}`}>
           {file ? 'Change file' : 'Choose file'}
