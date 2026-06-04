@@ -148,6 +148,10 @@ src/
     Retention.jsx            Working — see below
     Classes.jsx              Working — see below
     Students.jsx             Placeholder
+    SpecializedReporting.jsx Working — report picker shell; see below
+  reports/
+    PianoInspiresGrant.jsx          Specialized report — see below
+    UniqueGroupClassesBoard.jsx     Specialized report — see below
   App.jsx                    Sidebar nav shell (React Router v6)
   main.jsx
   index.css
@@ -262,6 +266,40 @@ Continuing is shown as `—` if the preceding quarter has no data in the DB, or 
 **Status: Placeholder.** Not yet built.
 
 Planned: filterable by quarter/fiscal year, gender, ethnicity, household income, pronouns, age (derived from birthdate). Show unique student counts and demographics breakdown. CSV export.
+
+---
+
+### Specialized Reporting (`/specialized`)
+
+A report-picker shell. Buttons at the top select which report to display below. Adding a new report requires only adding an entry to the `REPORTS` array in `SpecializedReporting.jsx` and creating the component in `src/reports/`.
+
+---
+
+#### Piano Inspires Grant
+
+Counts unique students enrolled in any piano or keyboard lesson or group class for a selected period. Reports total students, students receiving tuition assistance (tuition-free or any discount applied), and percentage assisted. Includes a collapsible course coverage list and a full student roster with CSV export.
+
+---
+
+#### Unique Group Classes for Board
+
+**Uniqueness:** One row per `event_id` (one unique class offering from ASAP). Quarter and Instructor columns are included so that visually similar rows across quarters can be manually identified and accounted for.
+
+**Data loading:** Two-phase (same pattern as Classes page).
+1. Mount: lightweight fetch of `event_id, time_period, fiscal_year` from CLASS events for period pills.
+2. On selection: full CLASS event details + enrollments with `students(birthdate)` join.
+
+**Category:** Determined by a hardcoded override map keyed on course name (maintained at the top of `UniqueGroupClassesBoard.jsx`). Falls back to the ASAP `department` field if no override exists.
+
+**Tuition-free:** All enrollments for that event are tuition-free (`is_tuition_free = true`), OR the course name starts with `"Young Musicians Program"` (hardcoded override).
+
+**Youth vs. Adult:** Each enrolled student's age is calculated as of the event's `class_start_date`. Students without a birthdate on record are excluded from the check. If every student with a known birthdate is under 19, the class is Youth; otherwise Adult. Defaults to Adult if no birthdates are known.
+
+**Filter pills:** Tuition Free / Fee Based (both active by default).
+
+**Table columns:** Course Name, Category, Instructor, Quarter, Age Group, Tuition Status, Total Enrolled, Total Tuition Free — all sortable. Summary totals row at bottom.
+
+**Export:** CSV of all visible rows.
 
 ---
 
