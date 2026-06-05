@@ -201,11 +201,10 @@ Special Reports → Enrollment → Retention → Classes → Students → Upload
 Magic link authentication via Supabase Auth. Shown to any unauthenticated visitor — the rest of the app is entirely hidden.
 
 - Centered card with CMC logo mark and email input
-- Calls `supabase.auth.signInWithOtp({ email })` on submit
-- Shows "Check your email for a login link." on success; error message on failure
+- Email and password inputs; calls `supabase.auth.signInWithPassword({ email, password })` on submit
+- Shows "Invalid email or password." on failure; on success the `onAuthStateChange` listener in `App.jsx` handles the transition automatically (no redirect logic needed in the form)
 - `App.jsx` resolves the session on mount with `getSession()` and stays in sync via `onAuthStateChange`. While the session is resolving, nothing is rendered (prevents flash). Once authenticated, the full layout renders; on sign-out, the login screen returns.
 - Sign out button at the bottom of the sidebar calls `supabase.auth.signOut()`
-- **Supabase config required:** set Site URL and redirect URL in Authentication → URL Configuration in the Supabase dashboard
 
 ---
 
