@@ -1,10 +1,13 @@
+import { useState, useEffect } from 'react'
 import { NavLink, Routes, Route, Navigate } from 'react-router-dom'
+import { supabase } from './lib/supabase'
 import Upload               from './pages/Upload'
 import Enrollment           from './pages/Enrollment'
 import Students             from './pages/Students'
 import Retention            from './pages/Retention'
 import Classes              from './pages/Classes'
 import SpecializedReporting from './pages/SpecializedReporting'
+import Login                from './pages/Login'
 
 const NAV_ITEMS = [
   { to: '/reports',    label: 'Special Reports' },
@@ -16,6 +19,21 @@ const NAV_ITEMS = [
 ]
 
 export default function App() {
+  const [session, setSession] = useState(undefined) // undefined = loading
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => setSession(data.session ?? null))
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session ?? null)
+    })
+    return () => subscription.unsubscribe()
+  }, [])
+
+  // Still resolving session — render nothing to avoid flash
+  if (session === undefined) return null
+
+  if (!session) return <Login />
+
   return (
     <div className="layout">
       <aside className="sidebar">
@@ -34,11 +52,19 @@ export default function App() {
             </NavLink>
           ))}
         </nav>
+        <div className="sidebar-footer">
+          <button
+            className="signout-btn"
+            onClick={() => supabase.auth.signOut()}
+          >
+            Sign out
+          </button>
+        </div>
       </aside>
 
       <main className="main-content">
         <Routes>
-          <Route path="/"           element={<Navigate to="/upload" replace />} />
+          <Route path="/"           element={<Navigate to="/reports" replace />} />
           <Route path="/upload"     element={<Upload />} />
           <Route path="/enrollment" element={<Enrollment />} />
           <Route path="/students"   element={<Students />} />
