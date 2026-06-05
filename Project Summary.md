@@ -9,7 +9,7 @@ Internal reporting dashboard for San Francisco Community Music Center (SFCMC). U
 | Layer | Technology |
 |---|---|
 | Frontend | React 18 + Vite 5, React Router v6 |
-| Backend / DB | Supabase (Postgres) |
+| Backend / DB | Supabase (Postgres + Auth) |
 | Hosting | Netlify (auto-deploys from GitHub on push to `main`) |
 | Repo | github.com/jrimler/dashboard |
 | File parsing | SheetJS (xlsx) |
@@ -168,6 +168,7 @@ src/
     uploadReports.js         Full upload + upsert pipeline (parse → join → upsert)
     periodUtils.js           Period sorting, parsing, label formatting, sort keys
   pages/
+    Login.jsx                Magic link login screen (shown when no session)
     Upload.jsx               Working — 4 labeled report sections (URL + instructions + file input), progress log, Test Connection
     Enrollment.jsx           Working — see below
     Retention.jsx            Working — see below
@@ -177,7 +178,7 @@ src/
   reports/
     PianoInspiresGrant.jsx          Specialized report — see below
     UniqueGroupClassesBoard.jsx     Specialized report — see below
-  App.jsx                    Sidebar nav shell (React Router v6)
+  App.jsx                    Auth gating + sidebar nav shell (React Router v6)
   main.jsx
   index.css
 supabase/
@@ -194,6 +195,19 @@ Special Reports → Enrollment → Retention → Classes → Students → Upload
 ---
 
 ## Pages
+
+### Login (`/`)
+
+Magic link authentication via Supabase Auth. Shown to any unauthenticated visitor — the rest of the app is entirely hidden.
+
+- Centered card with CMC logo mark and email input
+- Calls `supabase.auth.signInWithOtp({ email })` on submit
+- Shows "Check your email for a login link." on success; error message on failure
+- `App.jsx` resolves the session on mount with `getSession()` and stays in sync via `onAuthStateChange`. While the session is resolving, nothing is rendered (prevents flash). Once authenticated, the full layout renders; on sign-out, the login screen returns.
+- Sign out button at the bottom of the sidebar calls `supabase.auth.signOut()`
+- **Supabase config required:** set Site URL and redirect URL in Authentication → URL Configuration in the Supabase dashboard
+
+---
 
 ### Upload
 Four labeled report sections, each showing: report name, linked ASAP URL (opens in new tab), run instructions, and a file picker. Reports: Enrollment Report, Super Enrollment Report, Student Report, Super Class Summary Report. Upload button, scrolling status log. Each file is optional. Test Connection button validates Supabase credentials.
@@ -351,3 +365,4 @@ Counts unique students enrolled in any piano or keyboard lesson or group class f
 | New/Returning accuracy | Accepted | Depends on consistent `customer_id` values across all historical uploads |
 | Initial page load slowness | Fixed | Classes and Enrollment now defer heavy fetches until a period is selected |
 | Preceding quarter undefined for fiscal year periods | By design | Continuing row shows `—` for FY-level columns in Retention |
+| Auth session flash on load | Fixed | Session state initialises as `undefined`; app renders nothing until resolved |
