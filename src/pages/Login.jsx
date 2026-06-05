@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase'
 
 export default function Login() {
   const [email, setEmail]       = useState('')
-  const [sent, setSent]         = useState(false)
+  const [password, setPassword] = useState('')
   const [loading, setLoading]   = useState(false)
   const [error, setError]       = useState(null)
 
@@ -12,13 +12,9 @@ export default function Login() {
     setLoading(true)
     setError(null)
 
-    const { error: err } = await supabase.auth.signInWithOtp({ email })
+    const { error: err } = await supabase.auth.signInWithPassword({ email, password })
 
-    if (err) {
-      setError(err.message)
-    } else {
-      setSent(true)
-    }
+    if (err) setError('Invalid email or password.')
     setLoading(false)
   }
 
@@ -28,34 +24,38 @@ export default function Login() {
         <div className="login-logo">CMC</div>
         <h1 className="login-heading">Dashboard</h1>
 
-        {sent ? (
-          <div className="success-banner">
-            Check your email for a login link.
-          </div>
-        ) : (
-          <form className="login-form" onSubmit={handleSubmit}>
-            <label className="login-label" htmlFor="login-email">Email</label>
-            <input
-              id="login-email"
-              className="login-input"
-              type="email"
-              required
-              autoFocus
-              placeholder="you@sfcmc.org"
-              value={email}
-              onChange={e => setEmail(e.target.value)}
-              disabled={loading}
-            />
-            {error && <div className="error-banner">{error}</div>}
-            <button
-              className="btn-primary"
-              type="submit"
-              disabled={loading || !email}
-            >
-              {loading ? 'Sending…' : 'Send Login Link'}
-            </button>
-          </form>
-        )}
+        <form className="login-form" onSubmit={handleSubmit}>
+          <label className="login-label" htmlFor="login-email">Email</label>
+          <input
+            id="login-email"
+            className="login-input"
+            type="email"
+            required
+            autoFocus
+            placeholder="you@sfcmc.org"
+            value={email}
+            onChange={e => setEmail(e.target.value)}
+            disabled={loading}
+          />
+          <label className="login-label" htmlFor="login-password">Password</label>
+          <input
+            id="login-password"
+            className="login-input"
+            type="password"
+            required
+            value={password}
+            onChange={e => setPassword(e.target.value)}
+            disabled={loading}
+          />
+          {error && <div className="error-banner">{error}</div>}
+          <button
+            className="btn-primary"
+            type="submit"
+            disabled={loading || !email || !password}
+          >
+            {loading ? 'Signing in…' : 'Sign In'}
+          </button>
+        </form>
       </div>
     </div>
   )
