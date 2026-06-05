@@ -1,6 +1,6 @@
 # CMC Dashboard — Project Summary
 
-Internal reporting dashboard for San Francisco Community Music Center (SFCMC). Updated quarterly by manually uploading three ASAP exports. Live at **cmcdashboard.netlify.app**.
+Internal reporting dashboard for San Francisco Community Music Center (SFCMC). Updated quarterly by manually uploading four ASAP exports. Live at **cmcdashboard.netlify.app**.
 
 ---
 
@@ -19,13 +19,16 @@ Internal reporting dashboard for San Francisco Community Music Center (SFCMC). U
 
 ## Source Reports
 
-Three standardized ASAP exports. May arrive as real XLSX or HTML-disguised-as-XLS — the parser handles both.
+Four standardized ASAP exports. May arrive as real XLSX or HTML-disguised-as-XLS — the parser handles both.
 
-| Internal name | Report name | Primary use |
-|---|---|---|
-| REGULAR | Enrollment Report | Financial data, instructor names, quarter/term |
-| SUPER | Super Enrollment Report | Class details, location, timing, fiscal year |
-| STUDENT | Student Report | Demographics, identity, account info |
+| Internal name | Report name | URL | Primary use |
+|---|---|---|---|
+| REGULAR | Enrollment Report | `/Reports/EnrollmentsReport.aspx` | Financial data, instructor names, quarter/term |
+| SUPER | Super Enrollment Report | `/reports/SuperEnrollment.aspx?ReportID=30209` | Class details, location, timing, fiscal year |
+| STUDENT | Student Report | `/Reports/StudentReport.aspx` | Demographics, identity, account info |
+| CLASS SCHEDULE | Super Class Summary Report | `/reports/CustomQuery.aspx?ReportID=29315` | Schedule details: days, times, age range |
+
+All URLs are relative to `app.asapconnected.com`. The Upload page shows the full URL and run instructions for each report.
 
 ### Columns extracted
 
@@ -34,6 +37,8 @@ Three standardized ASAP exports. May arrive as real XLSX or HTML-disguised-as-XL
 **SUPER:** `Course Name`, `Fiscal Year`, `Primary Instructor`, `Location`, `Facility`, `Department`, `Activity Type`, `Class Start Date`, `Class End Date`, `Lesson Duration`, `All Meetings`, `Studentid`, `Event ID`, `Event Enrollment ID`, `Time Period`
 
 **STUDENT:** `Customer ID`, `First Name`, `Last Name`, `Birthdate`, `Customer Account Created Date`, `Gender`, `Gender1`, `Ethnicity`, `Ethnicity1`, `Ethnicity Info`, `Household Income - CMC funders ask for this inform`, `Household Income - CMC s funders ask for this info`, `Pronouns`
+
+**CLASS SCHEDULE:** `Class ID` (→ `event_id`), `Facility`, `Days Of Week`, `Start Time`, `End Time`, `Age Min`, `Age Max`, `Course ID`
 
 ---
 
@@ -74,6 +79,20 @@ Primary key: `event_id` (one row per class/lesson section)
 | `fiscal_year` | text | e.g. "FY26" |
 | `time_period` | text | e.g. "Spring Quarter 2026" |
 
+### `class_schedule`
+Primary key: `event_id` (FK → `events.event_id`). One row per class section; populated from the CLASS SCHEDULE report.
+
+| Field | Type | Notes |
+|---|---|---|
+| `event_id` | text PK FK | References `events.event_id` |
+| `facility` | text | Room/space name |
+| `days_of_week` | text | e.g. "Monday, Wednesday" |
+| `start_time` | text | e.g. "10:00 AM" |
+| `end_time` | text | e.g. "11:00 AM" |
+| `age_min` | integer | Minimum age for the class (nullable) |
+| `age_max` | integer | Maximum age for the class (nullable) |
+| `course_id` | text | ASAP course identifier (stored as text) |
+
 ### `enrollments`
 Primary key: `event_enrollment_id` (join of REGULAR + SUPER)
 
@@ -97,9 +116,15 @@ Primary key: `event_enrollment_id` (join of REGULAR + SUPER)
 1. Each file is optional — pass `null` to skip that table
 2. Enrollments require **both** REGULAR + SUPER (joined on `event_enrollment_id`)
 3. Upserts in batches of 500 rows
-4. FK order enforced: students → events → enrollments
+4. FK order enforced: students → events → enrollments → class_schedule
 5. Enrollments with no matching `customer_id` in the parsed student data are silently skipped to avoid FK violations
 6. `location` is `.trim()`-ed on ingest (Richmond source data has trailing spaces)
+7. CLASS SCHEDULE is upserted last (after enrollments) because `class_schedule.event_id` FK references `events`
+
+### Function signature
+```js
+uploadReports(regularFile, superFile, studentFile, log, classFile = null)
+```
 
 ### Derived fields
 - `is_tuition_free`: `(amount - total_discount) <= 15`
@@ -143,7 +168,7 @@ src/
     uploadReports.js         Full upload + upsert pipeline (parse → join → upsert)
     periodUtils.js           Period sorting, parsing, label formatting, sort keys
   pages/
-    Upload.jsx               Working — file inputs, progress log, Test Connection button
+    Upload.jsx               Working — 4 labeled report sections (URL + instructions + file input), progress log, Test Connection
     Enrollment.jsx           Working — see below
     Retention.jsx            Working — see below
     Classes.jsx              Working — see below
@@ -157,17 +182,21 @@ src/
   index.css
 supabase/
   migrations/
-    001_initial_schema.sql   All three tables + indexes
+    001_initial_schema.sql   students, events, enrollments tables + indexes
+    002_class_schedule.sql   class_schedule table + index (FK → events)
 netlify.toml                 SPA redirect (/* → /index.html)
 .env.example                 Env var template
 ```
+
+### Sidebar nav order
+Special Reports → Enrollment → Retention → Classes → Students → Upload
 
 ---
 
 ## Pages
 
 ### Upload
-Three file inputs (REGULAR, SUPER, STUDENT), Upload button, scrolling status log. Each file is optional. Test Connection button validates Supabase credentials.
+Four labeled report sections, each showing: report name, linked ASAP URL (opens in new tab), run instructions, and a file picker. Reports: Enrollment Report, Super Enrollment Report, Student Report, Super Class Summary Report. Upload button, scrolling status log. Each file is optional. Test Connection button validates Supabase credentials.
 
 ---
 
@@ -283,23 +312,31 @@ Counts unique students enrolled in any piano or keyboard lesson or group class f
 
 #### Unique Group Classes for Board
 
-**Uniqueness:** One row per `event_id` (one unique class offering from ASAP). Quarter and Instructor columns are included so that visually similar rows across quarters can be manually identified and accounted for.
+**Uniqueness:** One row per unique combination of `(course_name, primary_instructor, days_of_week, start_time, end_time)`. The same course running at a different time or with a different instructor appears as a separate row. Schedule fields (`days_of_week`, `start_time`, `end_time`) come from the `class_schedule` table; events with no matching row show `"—"` and still group correctly.
 
-**Data loading:** Two-phase (same pattern as Classes page).
-1. Mount: lightweight fetch of `event_id, time_period, fiscal_year` from CLASS events for period pills.
-2. On selection: full CLASS event details + enrollments with `students(birthdate)` join.
+**Data loading:** Three-phase.
+1. Mount: lightweight fetch of `fiscal_year` from CLASS events for FY period pills only (no quarter pills).
+2. On FY selection: full CLASS event details from `events`.
+3. Immediately after: batch-fetch `class_schedule` for all returned `event_id`s (500/request), then paginated enrollment fetch with `students(birthdate)` join. All three datasets joined client-side before grouping.
 
-**Category:** Determined by a hardcoded override map keyed on course name (maintained at the top of `UniqueGroupClassesBoard.jsx`). Falls back to the ASAP `department` field if no override exists.
+**Aggregation per unique class (across all matching events in the selected FY):**
+- `quarters_offered`: sorted distinct `time_period` values (e.g. "Fall 2025, Winter 2026, Spring 2026")
+- `total_enrolled`: sum of enrollment counts
+- `total_tuition_free`: sum of tuition-free enrollment counts
+- `age_group`: see below
+- `tuition_free_status`: see below
 
-**Tuition-free:** All enrollments for that event are tuition-free (`is_tuition_free = true`), OR the course name starts with `"Young Musicians Program"` (hardcoded override).
+**Category:** Hardcoded override map keyed on course name (`CATEGORY_MAP` at the top of `UniqueGroupClassesBoard.jsx`). Falls back to the ASAP `department` field if no override exists.
 
-**Youth vs. Adult:** Each enrolled student's age is calculated as of the event's `class_start_date`. Students without a birthdate on record are excluded from the check. If every student with a known birthdate is under 19, the class is Youth; otherwise Adult. Defaults to Adult if no birthdates are known.
+**Tuition-free:** All enrollments across all matching events are tuition-free (`is_tuition_free = true`), OR the course name starts with `"Young Musicians Program"` (hardcoded override).
 
-**Filter pills:** Tuition Free / Fee Based (both active by default).
+**Youth vs. Adult:** Each enrolled student's age is calculated as of that enrollment's event's `class_start_date`. Students without a birthdate on record are excluded from the check. If every student with a known birthdate is under 19 across all matching events, the class is Youth; otherwise Adult. Defaults to Adult if no birthdates are known.
 
-**Table columns:** Course Name, Category, Instructor, Quarter, Age Group, Tuition Status, Total Enrolled, Total Tuition Free — all sortable. Summary totals row at bottom.
+**Filter pills:** Two groups — Tuition Status (Tuition Free / Fee Based) and Age Group (Youth / Adult) — all active by default.
 
-**Export:** CSV of all visible rows.
+**Table columns:** Course Name, Category, Instructor, Days of Week, Time (start – end), Quarters Offered, Age Group, Tuition Status, Total Enrolled, Total Tuition Free — all sortable. Summary totals row at bottom (unique class count, total enrolled, total tuition free).
+
+**Export:** CSV of all visible rows with the same 10 columns.
 
 ---
 
