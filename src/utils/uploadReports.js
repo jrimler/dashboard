@@ -28,6 +28,8 @@ async function parseFile(file) {
     }, [])
 }
 
+const VALID_ENROLLMENT_STATUSES = new Set(['ENROLLED', 'PEND'])
+
 function pick(row, keys) {
   const out = {}
   keys.forEach(k => { out[k] = row[k] ?? null })
@@ -115,11 +117,23 @@ export async function uploadReports(regularFile, superFile, studentFile, log, cl
   if (regularFile) {
     log('Parsing REGULAR report...')
     regularRows = await parseFile(regularFile)
+    const badRegular = [...new Set(
+      regularRows.map(r => r['EnrollmentStatusCd']).filter(s => !VALID_ENROLLMENT_STATUSES.has(s))
+    )]
+    if (badRegular.length > 0) {
+      throw new Error(`REGULAR report contains unexpected EnrollmentStatusCd values: ${badRegular.map(s => JSON.stringify(s)).join(', ')}. Only ENROLLED and PEND are allowed.`)
+    }
     log(`  ${regularRows.length} rows`)
   }
   if (superFile) {
     log('Parsing SUPER report...')
     superRows = await parseFile(superFile)
+    const badSuper = [...new Set(
+      superRows.map(r => r['Enrollment Status']).filter(s => !VALID_ENROLLMENT_STATUSES.has(s))
+    )]
+    if (badSuper.length > 0) {
+      throw new Error(`SUPER report contains unexpected Enrollment Status values: ${badSuper.map(s => JSON.stringify(s)).join(', ')}. Only ENROLLED and PEND are allowed.`)
+    }
     log(`  ${superRows.length} rows`)
   }
   if (studentFile) {
