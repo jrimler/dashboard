@@ -3,7 +3,6 @@ import { NavLink, Routes, Route, Navigate } from 'react-router-dom'
 import { supabase } from './lib/supabase'
 import Upload               from './pages/Upload'
 import Enrollment           from './pages/Enrollment'
-import Students             from './pages/Students'
 import Retention            from './pages/Retention'
 import Classes              from './pages/Classes'
 import SpecializedReporting from './pages/SpecializedReporting'
@@ -14,7 +13,6 @@ const NAV_ITEMS = [
   { to: '/enrollment', label: 'Enrollment'      },
   { to: '/retention',  label: 'Retention'       },
   { to: '/classes',    label: 'Classes'         },
-  { to: '/students',   label: 'Students'        },
   { to: '/upload',     label: 'Upload'          },
 ]
 
@@ -67,7 +65,6 @@ export default function App() {
           <Route path="/"           element={<Navigate to="/reports" replace />} />
           <Route path="/upload"     element={<Upload />} />
           <Route path="/enrollment" element={<Enrollment />} />
-          <Route path="/students"   element={<Students />} />
           <Route path="/retention"  element={<Retention />} />
           <Route path="/classes"    element={<Classes />} />
           <Route path="/reports"    element={<SpecializedReporting />} />
