@@ -25,7 +25,7 @@ export default function SpecializedReporting() {
   return (
     <div className="page sr-page">
       <div className="enroll-header">
-        <h1>Specialized Reporting</h1>
+        <h1>Reports</h1>
       </div>
 
       <div className="sr-report-list">

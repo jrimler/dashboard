@@ -10,7 +10,7 @@ import SpecializedReporting from './pages/SpecializedReporting'
 import Login                from './pages/Login'
 
 const NAV_ITEMS = [
-  { to: '/reports',    label: 'Special Reports' },
+  { to: '/reports',    label: 'Reports'         },
   { to: '/enrollment', label: 'Enrollment'      },
   { to: '/retention',  label: 'Retention'       },
   { to: '/classes',    label: 'Classes'         },
