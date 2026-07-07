@@ -168,16 +168,16 @@ src/
     uploadReports.js         Full upload + upsert pipeline (parse → join → upsert)
     periodUtils.js           Period sorting, parsing, label formatting, sort keys
   pages/
-    Login.jsx                Magic link login screen (shown when no session)
+    Login.jsx                Email/password login screen (shown when no session)
     Upload.jsx               Working — 4 labeled report sections (URL + instructions + file input), progress log, Test Connection
     Enrollment.jsx           Working — see below
     Retention.jsx            Working — see below
     Classes.jsx              Working — see below
-    Students.jsx             Placeholder
     SpecializedReporting.jsx Working — report picker shell; see below
   reports/
     PianoInspiresGrant.jsx          Specialized report — see below
     UniqueGroupClassesBoard.jsx     Specialized report — see below
+    Demographics.jsx                Specialized report — see below
   App.jsx                    Auth gating + sidebar nav shell (React Router v6)
   main.jsx
   index.css
@@ -190,7 +190,7 @@ netlify.toml                 SPA redirect (/* → /index.html)
 ```
 
 ### Sidebar nav order
-Special Reports → Enrollment → Retention → Classes → Students → Upload
+Reports → Enrollment → Retention → Classes → Upload
 
 ---
 
@@ -198,13 +198,13 @@ Special Reports → Enrollment → Retention → Classes → Students → Upload
 
 ### Login (`/`)
 
-Magic link authentication via Supabase Auth. Shown to any unauthenticated visitor — the rest of the app is entirely hidden.
+Email/password authentication via Supabase Auth. Shown to any unauthenticated visitor — the rest of the app is entirely hidden.
 
-- Centered card with CMC logo mark and email input
-- Email and password inputs; calls `supabase.auth.signInWithPassword({ email, password })` on submit
+- Centered card with CMC logo mark, email and password inputs; calls `supabase.auth.signInWithPassword({ email, password })` on submit
 - Shows "Invalid email or password." on failure; on success the `onAuthStateChange` listener in `App.jsx` handles the transition automatically (no redirect logic needed in the form)
 - `App.jsx` resolves the session on mount with `getSession()` and stays in sync via `onAuthStateChange`. While the session is resolving, nothing is rendered (prevents flash). Once authenticated, the full layout renders; on sign-out, the login screen returns.
 - Sign out button at the bottom of the sidebar calls `supabase.auth.signOut()`
+- After login, the root route redirects to Reports (`/` → `/reports`)
 
 ---
 
@@ -304,14 +304,7 @@ Continuing is shown as `—` if the preceding quarter has no data in the DB, or 
 
 ---
 
-### Students (`/students`)
-**Status: Placeholder.** Not yet built.
-
-Planned: filterable by quarter/fiscal year, gender, ethnicity, household income, pronouns, age (derived from birthdate). Show unique student counts and demographics breakdown. CSV export.
-
----
-
-### Specialized Reporting (`/specialized`)
+### Specialized Reporting (`/reports`)
 
 A report-picker shell. Buttons at the top select which report to display below. Adding a new report requires only adding an entry to the `REPORTS` array in `SpecializedReporting.jsx` and creating the component in `src/reports/`.
 
@@ -350,6 +343,30 @@ Counts unique students enrolled in any piano or keyboard lesson or group class f
 **Table columns:** Course Name, Category, Instructor, Days of Week, Time (start – end), Quarters Offered, Age Group, Tuition Status, Total Enrolled, Total Tuition Free — all sortable. Summary totals row at bottom (unique class count, total enrolled, total tuition free).
 
 **Export:** CSV of all visible rows with the same 10 columns.
+
+---
+
+#### Demographics
+
+Summarizes age, gender, ethnicity, and household income for **unique students** in a selected fiscal year. Shows a **Total Students** breakdown followed by a per-class breakdown for each unique group class. Every figure is a raw unique-student count plus a percentage of that group's own total. No student names or per-student detail appear anywhere.
+
+**Period selector:** Fiscal Year only (no quarter pills), single-select. FY pills populated from distinct `fiscal_year` values in `enrollments`.
+
+**Units broken down:**
+- **Total Students** — all unique `customer_id`s with any enrollment in the FY, across **all** activity types (`LESSON` + `CLASS`), counted exactly once. The report's true denominator; its breakdowns sum to 100%.
+- **Each unique group class** — one row per `course_name` where `activity_type = 'CLASS'` (all sections/events with the same course name collapse together; instructor/day/time are *not* part of the grouping — differs from the Board report). Counts **unique students** within each course (a student in two sections of the same course counts once). Per-class counts do **not** sum to Total Students (a student can appear in multiple classes) — by design.
+
+**Age brackets** (computed from `birthdate` against the enrollment's event `class_start_date`; earliest `class_start_date` within the class for class rows, earliest across all FY enrollments for Total Students): `0–2`, `3–35`, `36–54`, `55–74`, `75+`, and `No Response` (no birthdate, or birthdate before 1905).
+
+**Gender / Ethnicity:** raw stored value as the category label; blank/null → `No Response`. Combined ethnicity strings (e.g. "Asian, White") count as their own single category — not split.
+
+**Household income:** mapped via an explicit case-insensitive lookup table (`INCOME_MAP` in `Demographics.jsx`), not numeric parsing. `HIGH`: Above $145,201 / Above $154,700 / $116,040–$154,700. `LOW`: Below $60,600 / Below $58,000 / $96,700–$116,040 / $97,000–$145,200 / $58,000–$96,700 / $60,600–$97,000. `DECLINE TO STATE`: Decline to state. `No Response`: blank, `0`, **and any value not in the map** (so a new ASAP income label lands in No Response rather than vanishing — map must be updated when ASAP adds brackets).
+
+**UI:** Total Students breakdown shown at top (count + % per bucket across the four dimensions); below it a sortable class table with the Classes-page drilldown pattern — click a class to expand its four-dimension breakdown. Percentages are always relative to the unit's own total; age and income buckets stay in fixed logical order, gender/ethnicity by descending count with `No Response` last.
+
+**Data loading:** Two-phase. Mount → distinct `fiscal_year` from `enrollments` (FY pills only). On FY selection → paginated fetch (1000/batch) of `enrollments` filtered by `fiscal_year`, joined to `events(activity_type, course_name, class_start_date)` and `students(birthdate, gender, ethnicity, household_income)`; all dedup/age/bucketing done client-side.
+
+**Export:** One comprehensive flat CSV per FY — a row per unit (Total Students first, then each class) with count + % columns for every age bracket, income category, and gender/ethnicity value present (gender/ethnicity columns generated dynamically).
 
 ---
 
