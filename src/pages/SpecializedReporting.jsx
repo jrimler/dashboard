@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import PianoInspiresGrant from '../reports/PianoInspiresGrant'
 import UniqueGroupClassesBoard from '../reports/UniqueGroupClassesBoard'
+import Demographics from '../reports/Demographics'
 
 const REPORTS = [
   {
@@ -14,6 +15,12 @@ const REPORTS = [
     label:       'Unique Group Classes for Board',
     description: 'One row per group class offering with category, age group, and tuition status for board reporting.',
     component:   UniqueGroupClassesBoard,
+  },
+  {
+    id:          'demographics',
+    label:       'Demographics',
+    description: 'Age, gender, ethnicity, and household income of unique students by fiscal year, overall and per group class.',
+    component:   Demographics,
   },
 ]
 

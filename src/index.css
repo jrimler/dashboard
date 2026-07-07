@@ -1004,3 +1004,57 @@
 .login-input:disabled { opacity: .6; cursor: not-allowed; }
 
 .login-form .btn-primary { width: 100%; text-align: center; align-self: stretch; margin-top: 4px; }
+
+/* ── Demographics report ── */
+.demo-total-block { margin-bottom: 28px; }
+
+.demo-dims {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 16px;
+}
+
+.demo-dim {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+}
+
+.demo-dim-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: var(--color-muted);
+  margin-bottom: 8px;
+}
+
+.demo-dim-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.demo-dim-table td { padding: 4px 0; border-bottom: 1px solid #f5f3f1; vertical-align: top; }
+.demo-dim-table tr:last-child td { border-bottom: none; }
+
+.demo-dim-label { color: var(--color-text); padding-right: 8px; }
+.demo-dim-count {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  white-space: nowrap;
+  padding-right: 10px;
+}
+.demo-dim-pct {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-muted);
+  white-space: nowrap;
+  width: 52px;
+}
+
+.demo-drilldown {
+  padding: 20px 24px;
+  background: #f8faf8;
+}
