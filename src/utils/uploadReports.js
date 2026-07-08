@@ -139,8 +139,11 @@ export async function uploadReports(regularFile, superFile, studentFile, log, cl
   if (regularFile) {
     log('Parsing REGULAR report...')
     regularRows = await parseFile(regularFile)
+    // ASAP exports can end with a junk totals row (no enrollment ID); those
+    // rows never import, so they don't get a say in status validation either.
     const badRegular = [...new Set(
-      regularRows.map(r => r['EnrollmentStatusCd']).filter(s => !VALID_ENROLLMENT_STATUSES.has(s))
+      regularRows.filter(r => String(r['EventEnrollmentID'] ?? '').trim())
+        .map(r => r['EnrollmentStatusCd']).filter(s => !VALID_ENROLLMENT_STATUSES.has(s))
     )]
     if (badRegular.length > 0) {
       throw new Error(`REGULAR report contains unexpected EnrollmentStatusCd values: ${badRegular.map(s => JSON.stringify(s)).join(', ')}. Only ENROLLED and PEND are allowed.`)
@@ -151,7 +154,8 @@ export async function uploadReports(regularFile, superFile, studentFile, log, cl
     log('Parsing SUPER report...')
     superRows = await parseFile(superFile)
     const badSuper = [...new Set(
-      superRows.map(r => r['Enrollment Status']).filter(s => !VALID_ENROLLMENT_STATUSES.has(s))
+      superRows.filter(r => String(r['Event Enrollment ID'] ?? '').trim())
+        .map(r => r['Enrollment Status']).filter(s => !VALID_ENROLLMENT_STATUSES.has(s))
     )]
     if (badSuper.length > 0) {
       throw new Error(`SUPER report contains unexpected Enrollment Status values: ${badSuper.map(s => JSON.stringify(s)).join(', ')}. Only ENROLLED and PEND are allowed.`)
