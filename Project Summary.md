@@ -365,7 +365,7 @@ Summarizes age, gender, ethnicity, and household income for **unique students** 
 
 **Age brackets** (computed from `birthdate` against the enrollment's event `class_start_date`; earliest `class_start_date` within the class for class rows, earliest across all FY enrollments for Total Students): `0–2`, `3–35`, `36–54`, `55–74`, `75+`, and `No Response` (no birthdate, or birthdate before 1905).
 
-**Gender / Ethnicity:** raw stored value as the category label; blank/null → `No Response`. Combined ethnicity strings (e.g. "Asian, White") count as their own single category — not split.
+**Gender / Ethnicity:** raw stored value as the category label; blank/null → `No Response`. Each student has one ethnicity (coalesced from the three source columns in priority order). **Hispanic/Latinx merge:** the values `"Hispanic"` and `"Latinx"` report as one category labeled `"Hispanic/Latinx"` (case-insensitive lookup via `ETHNICITY_ALIASES` in `Demographics.jsx`).
 
 **Household income:** mapped via an explicit case-insensitive lookup table (`INCOME_MAP` in `Demographics.jsx`), not numeric parsing. `HIGH`: Above $145,201 / Above $154,700 / $116,040–$154,700. `LOW`: Below $60,600 / Below $58,000 / Below $60,000 / $96,700–$116,040 / $97,000–$145,200 / $58,000–$96,700 / $60,600–$97,000 / $60,001–$69,000 / $69,001–$78,000 / $78,001–$86,000 / $86,001–$93,000 / Above $93,001. `DECLINE TO STATE`: Decline to state. `No Response`: blank, `0`, **and any value not in the map** (so a new ASAP income label lands in No Response rather than vanishing — map must be updated when ASAP adds brackets; ASAP's bracket labels have changed several times across years).
 

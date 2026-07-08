@@ -36,6 +36,14 @@ const INCOME_MAP = {
 
 const INCOME_ORDER = ['HIGH', 'LOW', 'DECLINE TO STATE', 'No Response']
 
+// Ethnicity labels that name the same group and should report as one category.
+// Matched case-insensitively against the stored value (each student has one
+// ethnicity, coalesced from the three source columns in priority order).
+const ETHNICITY_ALIASES = {
+  'hispanic': 'Hispanic/Latinx',
+  'latinx':   'Hispanic/Latinx',
+}
+
 const NO_RESPONSE = 'No Response'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -89,6 +97,13 @@ function incomeCategoryFor(raw) {
 function rawLabelFor(raw) {
   const v = String(raw ?? '').trim()
   return v === '' ? NO_RESPONSE : v
+}
+
+// Ethnicity label with Hispanic/Latinx aliases merged to one category.
+function ethnicityLabelFor(raw) {
+  const v = String(raw ?? '').trim()
+  if (v === '') return NO_RESPONSE
+  return ETHNICITY_ALIASES[v.toLowerCase()] ?? v
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -159,7 +174,7 @@ function buildBreakdown(studentsMap) {
   for (const s of studentsMap.values()) {
     bump(age,       ageBracketFor(s.birthdate, s.earliestStart))
     bump(gender,    rawLabelFor(s.gender))
-    bump(ethnicity, rawLabelFor(s.ethnicity))
+    bump(ethnicity, ethnicityLabelFor(s.ethnicity))
     bump(income,    incomeCategoryFor(s.income))
   }
   return {
