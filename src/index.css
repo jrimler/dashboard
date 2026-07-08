@@ -1034,6 +1034,50 @@
 /* ── Demographics report ── */
 .demo-total-block { margin-bottom: 28px; }
 
+/* ── Demographics scope tabs (Total / Lessons / Group Classes) ── */
+.demo-scope-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.demo-scope-tab {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 12px 18px;
+  min-width: 130px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: all .15s;
+  box-shadow: var(--shadow);
+}
+.demo-scope-tab:hover { border-color: var(--color-accent); }
+.demo-scope-tab.active {
+  border-color: var(--color-accent);
+  background: var(--color-accent-lt);
+}
+
+.demo-scope-tab-count {
+  font-size: 22px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text);
+}
+.demo-scope-tab.active .demo-scope-tab-count { color: var(--color-accent); }
+
+.demo-scope-tab-label {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--color-muted);
+}
+
 .demo-dims {
   display: flex;
   flex-wrap: wrap;
