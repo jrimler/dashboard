@@ -1,33 +1,8 @@
-import { useState } from 'react'
-import PianoInspiresGrant from '../reports/PianoInspiresGrant'
-import UniqueGroupClassesBoard from '../reports/UniqueGroupClassesBoard'
-import Demographics from '../reports/Demographics'
-
-const REPORTS = [
-  {
-    id:          'piano-inspires',
-    label:       'Piano Inspires Grant',
-    description: 'Unique piano/keyboard students and tuition assistance for grant reporting.',
-    component:   PianoInspiresGrant,
-  },
-  {
-    id:          'unique-group-classes-board',
-    label:       'Unique Group Classes for Board',
-    description: 'One row per group class offering with category, age group, and tuition status for board reporting.',
-    component:   UniqueGroupClassesBoard,
-  },
-  {
-    id:          'demographics',
-    label:       'Demographics',
-    description: 'Age, gender, ethnicity, and household income of unique students by fiscal year, overall and per group class.',
-    component:   Demographics,
-  },
-]
+import { useNavigate } from 'react-router-dom'
+import { REPORTS } from '../reports/registry'
 
 export default function SpecializedReporting() {
-  const [activeId, setActiveId] = useState(null)
-
-  const active = REPORTS.find(r => r.id === activeId) ?? null
+  const navigate = useNavigate()
 
   return (
     <div className="page sr-page">
@@ -39,21 +14,14 @@ export default function SpecializedReporting() {
         {REPORTS.map(r => (
           <button
             key={r.id}
-            className={`sr-report-btn${activeId === r.id ? ' active' : ''}`}
-            onClick={() => setActiveId(prev => prev === r.id ? null : r.id)}
+            className="sr-report-btn"
+            onClick={() => navigate(`/reports/${r.id}`)}
           >
             <span className="sr-report-btn-label">{r.label}</span>
             <span className="sr-report-btn-desc">{r.description}</span>
           </button>
         ))}
       </div>
-
-      {active && (
-        <div className="sr-report-body">
-          <div className="sr-report-body-title">{active.label}</div>
-          <active.component />
-        </div>
-      )}
     </div>
   )
 }

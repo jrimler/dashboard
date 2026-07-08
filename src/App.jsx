@@ -6,6 +6,7 @@ import Enrollment           from './pages/Enrollment'
 import Retention            from './pages/Retention'
 import Classes              from './pages/Classes'
 import SpecializedReporting from './pages/SpecializedReporting'
+import ReportDetail         from './pages/ReportDetail'
 import Login                from './pages/Login'
 
 const NAV_ITEMS = [
@@ -68,6 +69,7 @@ export default function App() {
           <Route path="/retention"  element={<Retention />} />
           <Route path="/classes"    element={<Classes />} />
           <Route path="/reports"    element={<SpecializedReporting />} />
+          <Route path="/reports/:reportId" element={<ReportDetail />} />
         </Routes>
       </main>
     </div>
