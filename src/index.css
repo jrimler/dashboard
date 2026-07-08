@@ -650,9 +650,9 @@
 .sr-page { max-width: none; }
 
 .sr-report-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
   margin-bottom: 28px;
 }
 
@@ -660,15 +660,16 @@
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 4px;
-  padding: 14px 20px;
+  gap: 6px;
+  height: 100%;
+  min-height: 104px;
+  padding: 18px 20px;
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
   cursor: pointer;
   text-align: left;
   transition: all .15s;
-  min-width: 220px;
   box-shadow: var(--shadow);
 }
 .sr-report-btn:hover {
@@ -901,8 +902,6 @@
 
 @media (max-width: 720px) {
   .pig-summary { flex-direction: column; }
-  .sr-report-list { flex-direction: column; }
-  .sr-report-btn { min-width: 0; width: 100%; }
 }
 
 /* ── Unique Group Classes for Board report ── */
