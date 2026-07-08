@@ -181,7 +181,9 @@ function buildUnits(enrollments) {
 }
 
 // Turns a deduped student Map into the four dimension breakdowns.
-// Every percentage is relative to this unit's own total.
+// Counts include "No Response", but percentages are relative to the count of
+// students with a meaningful response for that dimension (No Response excluded
+// from the base and shown with no percentage).
 function buildBreakdown(studentsMap) {
   const total = studentsMap.size
   const age = {}, gender = {}, ethnicity = {}, income = {}
@@ -204,24 +206,34 @@ function bump(counts, label) { counts[label] = (counts[label] ?? 0) + 1 }
 
 function pctOf(count, total) { return total === 0 ? 0 : (count / total) * 100 }
 
+// Percentage base: students with a meaningful response (total minus No Response).
+function respondedBase(counts, total) { return total - (counts[NO_RESPONSE] ?? 0) }
+
+// Percentages are out of the responded base; No Response shows count but no pct.
+function bucketPct(label, count, base) {
+  return label === NO_RESPONSE ? null : pctOf(count, base)
+}
+
 // Fixed logical bucket order (age, income); zero-count buckets stay visible.
 function fixedBuckets(order, counts, total) {
+  const base = respondedBase(counts, total)
   return order.map(label => ({
     label,
     count: counts[label] ?? 0,
-    pct:   pctOf(counts[label] ?? 0, total),
+    pct:   bucketPct(label, counts[label] ?? 0, base),
   }))
 }
 
 // Descending count with No Response last (gender, ethnicity); only present values.
 function countOrderedBuckets(counts, total) {
+  const base = respondedBase(counts, total)
   return Object.entries(counts)
     .sort(([la, ca], [lb, cb]) => {
       if (la === NO_RESPONSE) return 1
       if (lb === NO_RESPONSE) return -1
       return cb - ca || la.localeCompare(lb)
     })
-    .map(([label, count]) => ({ label, count, pct: pctOf(count, total) }))
+    .map(([label, count]) => ({ label, count, pct: bucketPct(label, count, base) }))
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -288,7 +300,7 @@ function exportCSV(totalBreakdown, classRows, fy) {
     for (const [cols, map] of dims) {
       for (const label of cols) {
         const b = map[label]
-        row.push(b?.count ?? 0, (b?.pct ?? 0).toFixed(1))
+        row.push(b?.count ?? 0, b?.pct == null ? '' : b.pct.toFixed(1))
       }
     }
     return row
@@ -342,7 +354,7 @@ function DimensionCard({ title, buckets }) {
             <tr key={b.label}>
               <td className="demo-dim-label">{b.label}</td>
               <td className="demo-dim-count">{b.count.toLocaleString()}</td>
-              <td className="demo-dim-pct">{b.pct.toFixed(1)}%</td>
+              <td className="demo-dim-pct">{b.pct === null ? '—' : `${b.pct.toFixed(1)}%`}</td>
             </tr>
           ))}
         </tbody>
@@ -484,8 +496,9 @@ export default function Demographics() {
           a <strong>Total Students</strong> breakdown (every unique student active in the fiscal
           year across all private lessons and group classes, counted once) followed by a per-class
           breakdown for each unique group class (one row per course name). Every figure is shown
-          both as a raw unique-student count and as a percentage of that group's own total.
-          No student names or other identifying details are shown.
+          as a raw unique-student count; percentages are out of only the students who gave a
+          meaningful response for that dimension (the "No Response" count is shown but excluded
+          from the percentage base). No student names or other identifying details are shown.
         </p>
       </div>
 

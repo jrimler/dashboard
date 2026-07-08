@@ -355,7 +355,7 @@ Counts unique students enrolled in any piano or keyboard lesson or group class f
 
 #### Demographics
 
-Summarizes age, gender, ethnicity, and household income for **unique students** in a selected fiscal year. Shows a **Total Students** breakdown followed by a per-class breakdown for each unique group class. Every figure is a raw unique-student count plus a percentage of that group's own total. No student names or per-student detail appear anywhere.
+Summarizes age, gender, ethnicity, and household income for **unique students** in a selected fiscal year. Shows a **Total Students** breakdown followed by a per-class breakdown for each unique group class. Every figure is a raw unique-student count plus a percentage. Percentages are calculated out of the students who gave a **meaningful response** for that dimension — the `No Response` count is shown but excluded from the percentage base (so it has no `%`, and the responding categories sum to 100%). The base is per-dimension, since No Response counts differ across age/gender/ethnicity/income. No student names or per-student detail appear anywhere.
 
 **Period selector:** Fiscal Year only (no quarter pills), single-select. FY pills populated from distinct `fiscal_year` values in `enrollments`.
 
@@ -369,7 +369,7 @@ Summarizes age, gender, ethnicity, and household income for **unique students** 
 
 **Household income:** mapped via an explicit case-insensitive lookup table (`INCOME_MAP` in `Demographics.jsx`), not numeric parsing. `High`: Above $145,201 / Above $154,700 / $116,040–$154,700. `Low`: Below $60,600 / Below $58,000 / Below $60,000 / $96,700–$116,040 / $97,000–$145,200 / $58,000–$96,700 / $60,600–$97,000 / $60,001–$69,000 / $69,001–$78,000 / $78,001–$86,000 / $86,001–$93,000 / Above $93,001. `Decline to State`: Decline to state. `No Response`: blank, `0`, **and any value not in the map** (so a new ASAP income label lands in No Response rather than vanishing — map must be updated when ASAP adds brackets; ASAP's bracket labels have changed several times across years).
 
-**UI:** Total Students breakdown shown at top (count + % per bucket across the four dimensions); below it a sortable class table with the Classes-page drilldown pattern — click a class to expand its four-dimension breakdown. Percentages are always relative to the unit's own total; age and income buckets stay in fixed logical order, gender/ethnicity by descending count with `No Response` last.
+**UI:** Total Students breakdown shown at top (count + % per bucket across the four dimensions); below it a sortable class table with the Classes-page drilldown pattern — click a class to expand its four-dimension breakdown. Percentages are relative to the meaningful-response count for that dimension (No Response shows a `—` for its percentage); age and income buckets stay in fixed logical order, gender/ethnicity by descending count with `No Response` last.
 
 **Data loading:** Two-phase. Mount → distinct `fiscal_year` from `enrollments` (FY pills only). On FY selection → paginated fetch (1000/batch) of `enrollments` filtered by `fiscal_year`, joined to `events(activity_type, course_name, class_start_date)` and `students(birthdate, gender, ethnicity, household_income)`; all dedup/age/bucketing done client-side.
 
