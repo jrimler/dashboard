@@ -19,7 +19,7 @@ Internal reporting dashboard for San Francisco Community Music Center (SFCMC). U
 
 ## Source Reports
 
-Four standardized ASAP exports. May arrive as real XLSX or HTML-disguised-as-XLS — the parser handles both.
+Four standardized ASAP exports. May arrive as real XLSX or HTML-disguised-as-XLS — the parser handles both. Two ASAP quirks the pipeline compensates for: "empty" cells often contain a single space or a literal `0` rather than nothing, and enrollment exports can end with a junk totals row (blank enrollment ID).
 
 | Internal name | Report name | URL | Primary use |
 |---|---|---|---|
@@ -54,9 +54,11 @@ Primary key: `customer_id`
 | `last_name` | text | |
 | `birthdate` | date | |
 | `account_created_date` | timestamptz | |
-| `gender` | text | Coalesce: `Gender1` wins over `Gender` |
+| `gender` | text | Coalesce: `Gender1` wins over `Gender`; legacy single-letter codes normalized (M→Male, F→Female, N→Nonbinary/Gender Nonconforming/Genderqueer, D→Decline to State) |
 | `ethnicity` | text | Coalesce: `Ethnicity Info` > `Ethnicity1` > `Ethnicity` |
 | `household_income` | text | Coalesce: newer column name wins |
+
+Coalescing takes the first **real** value: whitespace-only cells and literal `"0"` (ASAP's empty-cell placeholders) are treated as null, so a blank-looking high-priority column can't shadow an actual answer in a lower-priority one. (Before this fix, roughly a third of students had a demographic field silently blanked.)
 | `pronouns` | text | |
 
 ### `events`
@@ -114,12 +116,16 @@ Primary key: `event_enrollment_id` (join of REGULAR + SUPER)
 ## Upload Pipeline (`src/utils/uploadReports.js`)
 
 1. Each file is optional — pass `null` to skip that table
-2. Enrollments require **both** REGULAR + SUPER (joined on `event_enrollment_id`)
-3. Upserts in batches of 500 rows
-4. FK order enforced: students → events → enrollments → class_schedule
-5. Enrollments with no matching `customer_id` in the parsed student data are silently skipped to avoid FK violations
-6. `location` is `.trim()`-ed on ingest (Richmond source data has trailing spaces)
-7. CLASS SCHEDULE is upserted last (after enrollments) because `class_schedule.event_id` FK references `events`
+2. Enrollment statuses are validated: only `ENROLLED` and `PEND` are allowed; any other value rejects the file (junk totals rows with no enrollment ID are exempt — they never import)
+3. Enrollments require **both** REGULAR + SUPER (joined on `event_enrollment_id`)
+4. **Replace-by-quarter:** before inserting, existing enrollment rows for the time periods present in the batch are deleted. Each REGULAR+SUPER upload is a point-in-time snapshot, so this keeps the dashboard authoritative for its quarters — enrollments cancelled or changed in ASAP after a previous upload don't linger. Re-uploading a full-FY pull trues up the whole fiscal year. (Requires `DELETE` grant — migration 003.)
+5. Upserts in batches of 500 rows
+6. FK order enforced: students → events → enrollments → class_schedule
+7. Enrollments with no matching `customer_id` in the parsed student data are skipped with a logged warning to avoid FK violations
+8. `location` is `.trim()`-ed on ingest (Richmond source data has trailing spaces)
+9. CLASS SCHEDULE is upserted last (after enrollments) because `class_schedule.event_id` FK references `events`
+
+**Student uploads are last-write-wins** per `customer_id`: when re-uploading multiple STUDENT reports, go oldest → newest so the most recent demographics survive.
 
 ### Function signature
 ```js
@@ -185,6 +191,7 @@ supabase/
   migrations/
     001_initial_schema.sql   students, events, enrollments tables + indexes
     002_class_schedule.sql   class_schedule table + index (FK → events)
+    003_grant_delete_enrollments.sql   DELETE grant for replace-by-quarter uploads
 netlify.toml                 SPA redirect (/* → /index.html)
 .env.example                 Env var template
 ```
@@ -360,7 +367,7 @@ Summarizes age, gender, ethnicity, and household income for **unique students** 
 
 **Gender / Ethnicity:** raw stored value as the category label; blank/null → `No Response`. Combined ethnicity strings (e.g. "Asian, White") count as their own single category — not split.
 
-**Household income:** mapped via an explicit case-insensitive lookup table (`INCOME_MAP` in `Demographics.jsx`), not numeric parsing. `HIGH`: Above $145,201 / Above $154,700 / $116,040–$154,700. `LOW`: Below $60,600 / Below $58,000 / $96,700–$116,040 / $97,000–$145,200 / $58,000–$96,700 / $60,600–$97,000. `DECLINE TO STATE`: Decline to state. `No Response`: blank, `0`, **and any value not in the map** (so a new ASAP income label lands in No Response rather than vanishing — map must be updated when ASAP adds brackets).
+**Household income:** mapped via an explicit case-insensitive lookup table (`INCOME_MAP` in `Demographics.jsx`), not numeric parsing. `HIGH`: Above $145,201 / Above $154,700 / $116,040–$154,700. `LOW`: Below $60,600 / Below $58,000 / Below $60,000 / $96,700–$116,040 / $97,000–$145,200 / $58,000–$96,700 / $60,600–$97,000 / $60,001–$69,000 / $69,001–$78,000 / $78,001–$86,000 / $86,001–$93,000 / Above $93,001. `DECLINE TO STATE`: Decline to state. `No Response`: blank, `0`, **and any value not in the map** (so a new ASAP income label lands in No Response rather than vanishing — map must be updated when ASAP adds brackets; ASAP's bracket labels have changed several times across years).
 
 **UI:** Total Students breakdown shown at top (count + % per bucket across the four dimensions); below it a sortable class table with the Classes-page drilldown pattern — click a class to expand its four-dimension breakdown. Percentages are always relative to the unit's own total; age and income buckets stay in fixed logical order, gender/ethnicity by descending count with `No Response` last.
 
@@ -377,7 +384,12 @@ Summarizes age, gender, ethnicity, and household income for **unique students** 
 | Richmond location has trailing spaces in ASAP export | Fixed | `.trim()` on ingest and in all report queries |
 | Supabase 1000-row default page limit | Fixed | All fetches paginate in 1000-row batches |
 | `is_tuition_free` threshold | Decided | `<= 15` (not `=== 0`) to handle small processing fees |
-| Enrollment FK violations on upload | Fixed | Enrollments with no matching student silently skipped |
+| Enrollment FK violations on upload | Fixed | Enrollments with no matching student skipped with a logged warning |
+| ASAP placeholder cells (`" "` / `"0"`) shadowing real demographics | Fixed (July 2026) | Coalesce trims and treats both as null; caused a major ethnicity undercount (e.g. Filipino 47 vs actual 81 in FY26) until student reports were re-uploaded |
+| Legacy vs current gender labels (`M`/`F`/`N`/`D` vs full labels) | Fixed | Normalized to full labels on ingest |
+| Snapshot drift (uploads never deleted; cancelled enrollments lingered, late registrations missed) | Fixed (July 2026) | Replace-by-quarter on upload; all four FYs re-uploaded from fresh full-FY pulls. Recommended cadence: pull quarterly files at quarter end; after each FY closes, upload one full-FY REGULAR+SUPER pull to true up the year |
+| Junk totals row in fresh ASAP enrollment pulls | Fixed | Rows with no enrollment ID exempt from status validation |
+| ASAP exports contain student PII | Mitigated | `*.xls` / `*.xlsx` are gitignored so report files dropped into the repo can't be committed |
 | New/Returning accuracy | Accepted | Depends on consistent `customer_id` values across all historical uploads |
 | Initial page load slowness | Fixed | Classes and Enrollment now defer heavy fetches until a period is selected |
 | Preceding quarter undefined for fiscal year periods | By design | Continuing row shows `—` for FY-level columns in Retention |
