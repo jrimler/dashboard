@@ -1109,7 +1109,7 @@
   border-collapse: collapse;
   font-size: 13px;
 }
-.demo-dim-table td { padding: 4px 0; border-bottom: 1px solid #f5f3f1; vertical-align: top; }
+.demo-dim-table td { padding-top: 4px; padding-bottom: 4px; border-bottom: 1px solid #f5f3f1; vertical-align: top; }
 .demo-dim-table tr:last-child td { border-bottom: none; }
 
 .demo-dim-label {
@@ -1122,7 +1122,7 @@
   font-variant-numeric: tabular-nums;
   font-weight: 600;
   white-space: nowrap;
-  padding-right: 28px;
+  padding-right: 18px;
 }
 .demo-dim-pct {
   text-align: right;
