@@ -16,25 +16,25 @@ const MIN_BIRTH_YEAR = 1905
 // map falls to "No Response" — this map must be updated when ASAP introduces
 // new income labels.
 const INCOME_MAP = {
-  'above $145,201':        'HIGH',
-  'above $154,700':        'HIGH',
-  '$116,040 - $154,700':   'HIGH',
-  'below $60,600':         'LOW',
-  'below $58,000':         'LOW',
-  'below $60,000':         'LOW',
-  '$96,700 - $116,040':    'LOW',
-  '$97,000 - $145,200':    'LOW',
-  '$58,000 - $96,700':     'LOW',
-  '$60,600 - $97,000':     'LOW',
-  '$60,001 - $69,000':     'LOW',
-  '$69,001 - $78,000':     'LOW',
-  '$78,001 - $86,000':     'LOW',
-  '$86,001 - $93,000':     'LOW',
-  'above $93,001':         'LOW',
-  'decline to state':      'DECLINE TO STATE',
+  'above $145,201':        'High',
+  'above $154,700':        'High',
+  '$116,040 - $154,700':   'High',
+  'below $60,600':         'Low',
+  'below $58,000':         'Low',
+  'below $60,000':         'Low',
+  '$96,700 - $116,040':    'Low',
+  '$97,000 - $145,200':    'Low',
+  '$58,000 - $96,700':     'Low',
+  '$60,600 - $97,000':     'Low',
+  '$60,001 - $69,000':     'Low',
+  '$69,001 - $78,000':     'Low',
+  '$78,001 - $86,000':     'Low',
+  '$86,001 - $93,000':     'Low',
+  'above $93,001':         'Low',
+  'decline to state':      'Decline to State',
 }
 
-const INCOME_ORDER = ['HIGH', 'LOW', 'DECLINE TO STATE', 'No Response']
+const INCOME_ORDER = ['High', 'Low', 'Decline to State', 'No Response']
 
 // Ethnicity labels that name the same group and should report as one category.
 // Matched case-insensitively against the stored value (each student has one
