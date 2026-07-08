@@ -2,3 +2,7 @@ node_modules/
 dist/
 .env
 .env.local
+
+# ASAP exports dropped in for local analysis — contain student PII, never commit
+*.xls
+*.xlsx

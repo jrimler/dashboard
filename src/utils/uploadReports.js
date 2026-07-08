@@ -36,8 +36,30 @@ function pick(row, keys) {
   return out
 }
 
+// ASAP exports use whitespace-only cells and a literal "0" as empty
+// placeholders, so those must not count as real values here — otherwise a
+// blank-looking first column shadows a real answer in a later one.
 function coalesce(...values) {
-  return values.find(v => v !== null && v !== undefined && v !== '') ?? null
+  for (const v of values) {
+    if (v === null || v === undefined) continue
+    const s = String(v).trim()
+    if (s !== '' && s !== '0') return s
+  }
+  return null
+}
+
+// Older ASAP exports code gender as a single letter; normalize to the labels
+// the newer exports use so both vintages land in one category.
+const GENDER_CODE_MAP = {
+  M: 'Male',
+  F: 'Female',
+  N: 'Nonbinary/Gender Nonconforming/Genderqueer',
+  D: 'Decline to State',
+}
+
+function normalizeGender(v) {
+  if (v === null) return null
+  return GENDER_CODE_MAP[v.toUpperCase()] ?? v
 }
 
 function formatDate(val) {
@@ -169,7 +191,7 @@ export async function uploadReports(regularFile, superFile, studentFile, log, cl
         account_created_date: row['Customer Account Created Date']
                                 ? new Date(row['Customer Account Created Date']).toISOString()
                                 : null,
-        gender:               coalesce(row['Gender1'], row['Gender']),
+        gender:               normalizeGender(coalesce(row['Gender1'], row['Gender'])),
         ethnicity:            coalesce(row['Ethnicity Info'], row['Ethnicity1'], row['Ethnicity']),
         household_income:     coalesce(hIncome2, hIncome1),
         pronouns:             row['Pronouns'] ?? null,
