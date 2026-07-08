@@ -306,6 +306,15 @@ export async function uploadReports(regularFile, superFile, studentFile, log, cl
   }
 
   if (enrollments.length > 0) {
+    // A REGULAR+SUPER pair is a full snapshot of the time periods it contains,
+    // so rows from earlier snapshots of those periods (enrollments since
+    // cancelled or changed in ASAP) must not survive the new upload.
+    const periods = [...new Set(enrollments.map(e => e.time_period).filter(Boolean))]
+    if (periods.length > 0) {
+      log(`Replacing existing enrollments for: ${periods.join(', ')}`)
+      const { error } = await supabase.from('enrollments').delete().in('time_period', periods)
+      if (error) throw new Error(`Error clearing enrollments for ${periods.join(', ')}: ${error.message}`)
+    }
     log('Upserting enrollments...')
     await upsertInBatches('enrollments', enrollments, 'event_enrollment_id', log)
   }
