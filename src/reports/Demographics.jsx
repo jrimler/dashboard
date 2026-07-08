@@ -44,6 +44,14 @@ const ETHNICITY_ALIASES = {
   'latinx':   'Hispanic/Latinx',
 }
 
+// Gender labels that all report as one "Transgender" category.
+// Matched case-insensitively against the stored value.
+const GENDER_ALIASES = {
+  'trans male':   'Transgender',
+  'trans female': 'Transgender',
+  'transgender':  'Transgender',
+}
+
 const NO_RESPONSE = 'No Response'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -94,16 +102,18 @@ function incomeCategoryFor(raw) {
   return INCOME_MAP[key] ?? NO_RESPONSE
 }
 
-function rawLabelFor(raw) {
-  const v = String(raw ?? '').trim()
-  return v === '' ? NO_RESPONSE : v
-}
-
 // Ethnicity label with Hispanic/Latinx aliases merged to one category.
 function ethnicityLabelFor(raw) {
   const v = String(raw ?? '').trim()
   if (v === '') return NO_RESPONSE
   return ETHNICITY_ALIASES[v.toLowerCase()] ?? v
+}
+
+// Gender label with Trans Male/Trans Female/Transgender merged to one category.
+function genderLabelFor(raw) {
+  const v = String(raw ?? '').trim()
+  if (v === '') return NO_RESPONSE
+  return GENDER_ALIASES[v.toLowerCase()] ?? v
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -173,7 +183,7 @@ function buildBreakdown(studentsMap) {
   const age = {}, gender = {}, ethnicity = {}, income = {}
   for (const s of studentsMap.values()) {
     bump(age,       ageBracketFor(s.birthdate, s.earliestStart))
-    bump(gender,    rawLabelFor(s.gender))
+    bump(gender,    genderLabelFor(s.gender))
     bump(ethnicity, ethnicityLabelFor(s.ethnicity))
     bump(income,    incomeCategoryFor(s.income))
   }
