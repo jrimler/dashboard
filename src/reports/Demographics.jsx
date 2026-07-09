@@ -52,10 +52,9 @@ const GENDER_ALIASES = {
   'trans male':   'Transgender',
   'trans female': 'Transgender',
   'transgender':  'Transgender',
-  'nonbinary/gender nonconforming/genderqueer': 'Gender Non-Conforming',
-  'gender non-conforming':                      'Gender Non-Conforming',
-  'agender':                                    'Gender Non-Conforming',
-  'another gender not listed here':             'Gender Non-Conforming',
+  'nonbinary/gender nonconforming/genderqueer': 'Nonbinary/Gender Nonconforming/Genderqueer',
+  'gender non-conforming':                      'Nonbinary/Gender Nonconforming/Genderqueer',
+  'decline to state':                           'Decline to state',
 }
 
 const NO_RESPONSE = 'No Response'
