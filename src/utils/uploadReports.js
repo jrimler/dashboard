@@ -196,7 +196,9 @@ export async function uploadReports(regularFile, superFile, studentFile, log, cl
                                 ? new Date(row['Customer Account Created Date']).toISOString()
                                 : null,
         gender:               normalizeGender(coalesce(row['Gender1'], row['Gender'])),
-        ethnicity:            coalesce(row['Ethnicity Info'], row['Ethnicity1'], row['Ethnicity']),
+        // Ethnicity precedence matches ASAP's standard reporting: the original
+        // "Ethnicity" column wins, then "Ethnicity1", then "Ethnicity Info".
+        ethnicity:            coalesce(row['Ethnicity'], row['Ethnicity1'], row['Ethnicity Info']),
         household_income:     coalesce(hIncome2, hIncome1),
         pronouns:             row['Pronouns'] ?? null,
       }

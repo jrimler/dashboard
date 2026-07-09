@@ -55,7 +55,7 @@ Primary key: `customer_id`
 | `birthdate` | date | |
 | `account_created_date` | timestamptz | |
 | `gender` | text | Coalesce: `Gender1` wins over `Gender`; legacy single-letter codes normalized (M→Male, F→Female, N→Nonbinary/Gender Nonconforming/Genderqueer, D→Decline to State) |
-| `ethnicity` | text | Coalesce: `Ethnicity Info` > `Ethnicity1` > `Ethnicity` |
+| `ethnicity` | text | Coalesce: `Ethnicity` > `Ethnicity1` > `Ethnicity Info` (matches ASAP standard reporting — the original `Ethnicity` column wins) |
 | `household_income` | text | Coalesce: newer column name wins |
 
 Coalescing takes the first **real** value: whitespace-only cells and literal `"0"` (ASAP's empty-cell placeholders) are treated as null, so a blank-looking high-priority column can't shadow an actual answer in a lower-priority one. (Before this fix, roughly a third of students had a demographic field silently blanked.)
@@ -388,6 +388,7 @@ Summarizes age, gender, ethnicity, and household income for **unique students** 
 | `is_tuition_free` threshold | Decided | `<= 15` (not `=== 0`) to handle small processing fees |
 | Enrollment FK violations on upload | Fixed | Enrollments with no matching student skipped with a logged warning |
 | ASAP placeholder cells (`" "` / `"0"`) shadowing real demographics | Fixed (July 2026) | Coalesce trims and treats both as null; caused a major ethnicity undercount (e.g. Filipino 47 vs actual 81 in FY26) until student reports were re-uploaded |
+| Ethnicity coalesce order disagreed with ASAP standard reporting | Fixed (July 2026) | Flipped to `Ethnicity` > `Ethnicity1` > `Ethnicity Info` (original column wins) to match ASAP; verified against a colleague's FY26 pivot (matched every named category exactly). Was `Ethnicity Info` > `Ethnicity1` > `Ethnicity`. **Requires re-uploading student reports to take effect** (the report reads the stored coalesced value) |
 | Legacy vs current gender labels (`M`/`F`/`N`/`D` vs full labels) | Fixed | Normalized to full labels on ingest |
 | Snapshot drift (uploads never deleted; cancelled enrollments lingered, late registrations missed) | Fixed (July 2026) | Replace-by-quarter on upload; all four FYs re-uploaded from fresh full-FY pulls. Recommended cadence: pull quarterly files at quarter end; after each FY closes, upload one full-FY REGULAR+SUPER pull to true up the year |
 | Junk totals row in fresh ASAP enrollment pulls | Fixed | Rows with no enrollment ID exempt from status validation |
