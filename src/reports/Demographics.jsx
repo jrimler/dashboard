@@ -18,9 +18,7 @@ const MIN_BIRTH_YEAR = 1905
 // map falls to "No Response" — this map must be updated when ASAP introduces
 // new income labels.
 const INCOME_MAP = {
-  'above $145,201':        'High',
   'above $154,700':        'High',
-  '$116,040 - $154,700':   'High',
   'below $60,600':         'Low',
   'below $58,000':         'Low',
   'below $60,000':         'Low',
@@ -33,6 +31,8 @@ const INCOME_MAP = {
   '$78,001 - $86,000':     'Low',
   '$86,001 - $93,000':     'Low',
   'above $93,001':         'Low',
+  '$116,040 - $154,700':   'Low',
+  'above $145,201':        'Low',
   'decline to state':      'Decline to State',
 }
 
