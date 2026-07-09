@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react'
-import { NavLink, Routes, Route, Navigate } from 'react-router-dom'
+import { useState, useEffect, useRef } from 'react'
+import { NavLink, Routes, Route, Navigate, useNavigate } from 'react-router-dom'
 import { supabase } from './lib/supabase'
 import Upload               from './pages/Upload'
 import Enrollment           from './pages/Enrollment'
@@ -19,6 +19,8 @@ const NAV_ITEMS = [
 
 export default function App() {
   const [session, setSession] = useState(undefined) // undefined = loading
+  const navigate = useNavigate()
+  const didInitialRedirect = useRef(false)
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session ?? null))
@@ -27,6 +29,16 @@ export default function App() {
     })
     return () => subscription.unsubscribe()
   }, [])
+
+  // On the first authenticated load, always land on Reports regardless of the
+  // entry URL (e.g. a bookmarked /upload or a browser-restored tab). Runs once
+  // per app load, so navigating to Upload later in the session still works.
+  useEffect(() => {
+    if (session && !didInitialRedirect.current) {
+      didInitialRedirect.current = true
+      navigate('/reports', { replace: true })
+    }
+  }, [session, navigate])
 
   // Still resolving session — render nothing to avoid flash
   if (session === undefined) return null
