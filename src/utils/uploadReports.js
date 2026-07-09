@@ -49,17 +49,21 @@ function coalesce(...values) {
 }
 
 // Older ASAP exports code gender as a single letter; normalize to the labels
-// the newer exports use so both vintages land in one category.
+// the newer exports use so both vintages land in one category. Legacy "N" is
+// treated as No Response (stored null) rather than Nonbinary — per CMC's
+// reporting rules the single-letter code is too ambiguous to count as a
+// meaningful nonbinary response.
 const GENDER_CODE_MAP = {
   M: 'Male',
   F: 'Female',
-  N: 'Nonbinary/Gender Nonconforming/Genderqueer',
+  N: null,
   D: 'Decline to State',
 }
 
 function normalizeGender(v) {
   if (v === null) return null
-  return GENDER_CODE_MAP[v.toUpperCase()] ?? v
+  const key = v.toUpperCase()
+  return key in GENDER_CODE_MAP ? GENDER_CODE_MAP[key] : v
 }
 
 function formatDate(val) {
