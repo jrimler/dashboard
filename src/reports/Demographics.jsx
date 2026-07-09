@@ -55,6 +55,7 @@ const GENDER_ALIASES = {
   'nonbinary/gender nonconforming/genderqueer': 'Nonbinary/Gender Nonconforming/Genderqueer',
   'gender non-conforming':                      'Nonbinary/Gender Nonconforming/Genderqueer',
   'decline to state':                           'Decline to State',
+  'two spirit':                                 'Two Spirit',
 }
 
 const NO_RESPONSE = 'No Response'
