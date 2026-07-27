@@ -29,15 +29,11 @@ const MAX_AGE = 18
 // (ASAP writes 1900-01-01 → age ~126 when a birthdate is missing).
 const MAX_PLAUSIBLE_AGE = 100
 
-// Assistance display mode per group: 'dollars' shows summed discounts;
-// 'subsidized' shows the count of fully tuition-free students (the free
-// programs record their discount inconsistently, so a dollar figure would
-// understate them).
 const GROUPS = [
-  { id: 'sliding', title: 'Sliding-Scale Youth (ages 4–18)', mode: 'dollars',    ageFiltered: true  },
-  { id: 'ymp',     title: 'Young Musicians Program (YMP)',    mode: 'dollars',    ageFiltered: false },
-  { id: 'chorus',  title: "Children's Chorus",               mode: 'subsidized', ageFiltered: false },
-  { id: 'teen',    title: 'Teen Jazz Orchestra',             mode: 'subsidized', ageFiltered: false },
+  { id: 'sliding', title: 'Sliding-Scale Youth (ages 4–18)', ageFiltered: true  },
+  { id: 'ymp',     title: 'Young Musicians Program (YMP)',    ageFiltered: false },
+  { id: 'chorus',  title: "Children's Chorus",               ageFiltered: false },
+  { id: 'teen',    title: 'Teen Jazz Orchestra',             ageFiltered: false },
 ]
 
 const NO_RESPONSE = 'No Response'
@@ -80,10 +76,6 @@ function ethnicityLabelFor(raw) {
   return ETHNICITY_ALIASES[v.toLowerCase()] ?? v
 }
 
-function fmtMoney(n) {
-  return `$${Number(n).toLocaleString(undefined, { maximumFractionDigits: 0 })}`
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Ethnicity breakdown (descending count, No Response last; percentages out of
 // the responded base, matching the Demographics report)
@@ -118,32 +110,22 @@ function ethnicityBreakdown(studentsMap) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function buildReport(enrollments) {
-  // Per-group accumulators
+  // Per-group accumulators (customer_id → { ethnicity })
   const acc = {}
-  for (const g of GROUPS) {
-    acc[g.id] = {
-      students:   new Map(),  // customer_id → { ethnicity }
-      dollars:    0,
-      subsidized: new Set(),  // customer_id with a fully tuition-free defining enrollment
-    }
-  }
+  for (const g of GROUPS) acc[g.id] = { students: new Map() }
   const slidingSeen     = new Set()  // any customer with a sliding-scale discount, any age
   const combinedStudents = new Map() // deduped union across all four groups
-  const combinedDefiningEnrollments = new Map() // enrollment_id → discount (dedup for combined $)
 
-  function addMember(groupId, cid, student, enrId, disc, free) {
+  function addMember(groupId, cid, student) {
     const a = acc[groupId]
     if (!a.students.has(cid)) a.students.set(cid, { ethnicity: student.ethnicity ?? null })
     else if (a.students.get(cid).ethnicity == null && student.ethnicity != null) {
       a.students.get(cid).ethnicity = student.ethnicity
     }
-    a.dollars += disc
-    if (free) a.subsidized.add(cid)
     if (!combinedStudents.has(cid)) combinedStudents.set(cid, { ethnicity: student.ethnicity ?? null })
     else if (combinedStudents.get(cid).ethnicity == null && student.ethnicity != null) {
       combinedStudents.get(cid).ethnicity = student.ethnicity
     }
-    if (enrId != null) combinedDefiningEnrollments.set(enrId, disc)
   }
 
   for (const e of enrollments) {
@@ -152,24 +134,21 @@ function buildReport(enrollments) {
     const student = e.students ?? {}
     const course  = e.events?.course_name ?? null
     const dt      = e.discount_type ?? ''
-    const disc    = Number(e.total_discount ?? 0)
-    const free    = !!e.is_tuition_free
-    const enrId   = e.event_enrollment_id
 
     // 1. Sliding-scale youth: has a Child<NN> discount AND age 4–18 at class start.
     if (SLIDING_RE.test(dt)) {
       slidingSeen.add(cid)
       const age = ageAtDate(student.birthdate, e.events?.class_start_date)
       if (age !== null && age >= MIN_AGE && age <= MAX_AGE && age <= MAX_PLAUSIBLE_AGE) {
-        addMember('sliding', cid, student, enrId, disc, free)
+        addMember('sliding', cid, student)
       }
     }
     // 2. YMP: enrolled in any of the three named group classes.
-    if (course && YMP_COURSES.has(course)) addMember('ymp', cid, student, enrId, disc, free)
+    if (course && YMP_COURSES.has(course)) addMember('ymp', cid, student)
     // 3. Children's Chorus.
-    if (course === CHILDRENS_CHORUS) addMember('chorus', cid, student, enrId, disc, free)
+    if (course === CHILDRENS_CHORUS) addMember('chorus', cid, student)
     // 4. Teen Jazz Orchestra.
-    if (course === TEEN_JAZZ) addMember('teen', cid, student, enrId, disc, free)
+    if (course === TEEN_JAZZ) addMember('teen', cid, student)
   }
 
   // Sliding-scale students dropped because their age couldn't be confirmed 4–18.
@@ -178,19 +157,14 @@ function buildReport(enrollments) {
   const groups = GROUPS.map(g => ({
     ...g,
     uniqueStudents: acc[g.id].students.size,
-    dollars:        acc[g.id].dollars,
-    subsidized:     acc[g.id].subsidized.size,
     ethnicity:      ethnicityBreakdown(acc[g.id].students),
   }))
-
-  const combinedDollars = [...combinedDefiningEnrollments.values()].reduce((s, d) => s + d, 0)
 
   return {
     groups,
     slidingExcludedAge,
     combined: {
       uniqueStudents: combinedStudents.size,
-      dollars:        combinedDollars,
       ethnicity:      ethnicityBreakdown(combinedStudents),
     },
   }
@@ -205,13 +179,11 @@ function exportCSV(report, fy) {
     ...report.groups.map(g => ({
       label: g.title,
       students: g.uniqueStudents,
-      assistance: g.mode === 'dollars' ? fmtMoney(g.dollars) : `${g.subsidized} fully subsidized`,
       ethnicity: g.ethnicity,
     })),
     {
       label: 'Combined (unique across all groups)',
       students: report.combined.uniqueStudents,
-      assistance: fmtMoney(report.combined.dollars),
       ethnicity: report.combined.ethnicity,
     },
   ]
@@ -222,13 +194,13 @@ function exportCSV(report, fy) {
     for (const b of u.ethnicity.buckets) if (!seen.has(b.label)) { seen.add(b.label); ethCols.push(b.label) }
   }
 
-  const headers = ['Group', 'Unique Students', 'Tuition Assistance']
+  const headers = ['Group', 'Unique Students']
   for (const c of ethCols) headers.push(`Ethnicity ${c} Count`, `Ethnicity ${c} %`)
 
   const rows = units.map(u => {
     const map = {}
     for (const b of u.ethnicity.buckets) map[b.label] = b
-    const row = [u.label, u.students, u.assistance]
+    const row = [u.label, u.students]
     for (const c of ethCols) {
       const b = map[c]
       row.push(b?.count ?? 0, b?.pct == null ? '' : b.pct.toFixed(1))
@@ -270,30 +242,15 @@ function EthnicityCard({ breakdown }) {
 }
 
 function GroupCard({ group }) {
-  const primary = group.mode === 'dollars'
-    ? { value: fmtMoney(group.dollars),          label: 'Tuition assistance awarded' }
-    : { value: group.subsidized.toLocaleString(), label: 'Students fully subsidized' }
-  const secondary = group.mode === 'dollars'
-    ? `${group.subsidized.toLocaleString()} fully subsidized`
-    : `${fmtMoney(group.dollars)} recorded discounts`
-
   return (
     <div className="liyp-group-card">
       <div className="pig-roster-header">
         <span className="pig-roster-title">{group.title}</span>
       </div>
       <div className="pig-summary">
-        <div className="pig-stat-card">
+        <div className="pig-stat-card pig-stat-card--accent">
           <div className="pig-stat-value">{group.uniqueStudents.toLocaleString()}</div>
           <div className="pig-stat-label">Unique students</div>
-        </div>
-        <div className="pig-stat-card pig-stat-card--accent">
-          <div className="pig-stat-value">{primary.value}</div>
-          <div className="pig-stat-label">{primary.label}</div>
-        </div>
-        <div className="pig-stat-card">
-          <div className="pig-stat-value" style={{ fontSize: '1rem', fontWeight: 500 }}>{secondary}</div>
-          <div className="pig-stat-label">Also recorded</div>
         </div>
       </div>
       <div className="demo-dims">
@@ -355,7 +312,7 @@ export default function LowIncomeYouthProgram() {
       const { data, error } = await supabase
         .from('enrollments')
         .select(`
-          event_enrollment_id, customer_id, total_discount, is_tuition_free, discount_type,
+          customer_id, discount_type,
           events(course_name, class_start_date),
           students(birthdate, ethnicity)
         `)
@@ -402,15 +359,6 @@ export default function LowIncomeYouthProgram() {
               <li><strong>Children's Chorus</strong> and <strong>Teen Jazz Orchestra</strong> —
                 students enrolled in the class of that name.</li>
             </ul>
-            <div className="ugcb-info-section-title">Tuition assistance</div>
-            <p>
-              For <strong>Sliding-Scale Youth</strong> and <strong>YMP</strong>, assistance is the sum
-              of recorded discounts (<code>total_discount</code>) on that group's own enrollments. For
-              <strong> Children's Chorus</strong> and <strong>Teen Jazz Orchestra</strong> — which are
-              tuition-free but whose discounts ASAP often records as $0 — we instead report the number
-              of students receiving 100%-subsidized instruction. Each card also shows the other figure
-              for transparency.
-            </p>
             <div className="ugcb-info-section-title">Ethnicity</div>
             <p>
               Categories match the Demographics report (Hispanic and Latinx merged to Hispanic/Latinx).
@@ -480,13 +428,9 @@ export default function LowIncomeYouthProgram() {
                   <span className="pig-roster-title">Combined — unique students across all groups</span>
                 </div>
                 <div className="pig-summary">
-                  <div className="pig-stat-card">
+                  <div className="pig-stat-card pig-stat-card--accent">
                     <div className="pig-stat-value">{report.combined.uniqueStudents.toLocaleString()}</div>
                     <div className="pig-stat-label">Unique students (de-duplicated)</div>
-                  </div>
-                  <div className="pig-stat-card pig-stat-card--accent">
-                    <div className="pig-stat-value">{fmtMoney(report.combined.dollars)}</div>
-                    <div className="pig-stat-label">Total recorded discounts</div>
                   </div>
                 </div>
                 <div className="demo-dims">
