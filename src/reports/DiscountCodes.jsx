@@ -20,6 +20,22 @@ function triggerDownload(csv, filename) {
 
 function today() { return new Date().toISOString().slice(0, 10) }
 
+// Ages outside this range are treated as an unknown birthdate — ASAP writes a
+// 1900-01-01 placeholder (age ~126) when the real date is missing.
+const MAX_PLAUSIBLE_AGE = 100
+
+// Age in full years of a person born on birthdateStr as of referenceDateStr.
+// Returns null if missing or implausible (placeholder birthdate).
+function ageAtDate(birthdateStr, referenceDateStr) {
+  if (!birthdateStr || !referenceDateStr) return null
+  const [by, bm, bd] = birthdateStr.split('-').map(Number)
+  const [ry, rm, rd] = referenceDateStr.split('-').map(Number)
+  let age = ry - by
+  if (rm < bm || (rm === bm && rd < bd)) age--
+  if (age < 0 || age > MAX_PLAUSIBLE_AGE) return null
+  return age
+}
+
 // Normalize a discount_type into a real code or null (no discount). ASAP writes
 // blanks as an empty string, a single space, or the literal "0".
 function normCode(raw) {
@@ -112,12 +128,17 @@ function buildSummary(enrollments) {
       s = {
         firstName: e.students?.first_name ?? '',
         lastName:  e.students?.last_name  ?? '',
+        birthdate: e.students?.birthdate  ?? null,
+        earliestStart: null,
         enrollments: 0,
         withDiscount: 0,
         codes: new Map(),
       }
       students.set(cid, s)
     }
+    if (s.birthdate == null && e.students?.birthdate != null) s.birthdate = e.students.birthdate
+    const start = e.events?.class_start_date ?? null
+    if (start && (!s.earliestStart || start < s.earliestStart)) s.earliestStart = start
     s.enrollments += 1
     if (code) {
       s.withDiscount += 1
@@ -132,6 +153,7 @@ function buildSummary(enrollments) {
     customerId,
     firstName: s.firstName,
     lastName: s.lastName,
+    age: ageAtDate(s.birthdate, s.earliestStart),
     enrollments: s.enrollments,
     withDiscount: s.withDiscount,
     codeCount: s.codes.size,
@@ -180,11 +202,11 @@ function exportCodeCSV(rows, label) {
 }
 
 function exportStudentCSV(rows, label) {
-  const headers = ['Customer ID', 'First Name', 'Last Name', 'Enrollments', 'Enrollments w/ Discount', 'Discount Codes']
+  const headers = ['Customer ID', 'First Name', 'Last Name', 'Age at Enrollment', 'Enrollments', 'Enrollments w/ Discount', 'Discount Codes']
   const csv = [
     headers,
     ...rows.map(r => [
-      r.customerId, r.firstName, r.lastName, r.enrollments, r.withDiscount,
+      r.customerId, r.firstName, r.lastName, r.age ?? '', r.enrollments, r.withDiscount,
       r.codes.map(([code, n]) => (n > 1 ? `${code} (x${n})` : code)).join('; '),
     ]),
   ].map(r => r.map(esc).join(',')).join('\n')
@@ -265,7 +287,7 @@ export default function DiscountCodes() {
 
     let query = supabase
       .from('enrollments')
-      .select('customer_id, discount_type, time_period, fiscal_year, students(first_name, last_name)')
+      .select('customer_id, discount_type, time_period, fiscal_year, events(class_start_date), students(first_name, last_name, birthdate)')
 
     if (quarters.length > 0 && fys.length > 0) {
       const qList = quarters.map(q => `"${q}"`).join(',')
@@ -303,6 +325,7 @@ export default function DiscountCodes() {
     const rows = discountedOnly ? studentRows.filter(r => r.withDiscount > 0) : studentRows
     return sortBy(rows, studentSort.col, studentSort.dir, {
       lastName:     r => `${(r.lastName ?? '').toLowerCase()} ${(r.firstName ?? '').toLowerCase()}`,
+      age:          r => (r.age == null ? -1 : r.age),
       enrollments:  r => r.enrollments,
       withDiscount: r => r.withDiscount,
       codeCount:    r => r.codeCount,
@@ -340,8 +363,10 @@ export default function DiscountCodes() {
           Select one or more fiscal years and/or quarters. The <strong>Discount Code Summary</strong>{' '}
           lists every discount code applied to an enrollment in that timeframe, with how many times it
           was applied (applications) and how many unique students received it. The{' '}
-          <strong>Student List</strong> shows every student with an enrollment in the timeframe and the
-          discount codes they received. Both tables are downloadable as CSVs. "Applications" counts
+          <strong>Student List</strong> shows every student with an enrollment in the timeframe, their
+          age at their earliest enrollment in that timeframe, and the discount codes they received
+          (a missing or placeholder birthdate shows as "—"). Both tables are downloadable as CSVs.
+          "Applications" counts
           enrollment rows, so a student enrolled in several classes with the same code is counted once
           per enrollment in the summary but once overall in the unique-student column.
         </p>
@@ -425,6 +450,7 @@ export default function DiscountCodes() {
                     <tr>
                       <th className="cls-th">Customer ID</th>
                       <SortTh col="lastName"     label="Student"                 sortCol={studentSort.col} sortDir={studentSort.dir} onSort={sortStudent} />
+                      <SortTh col="age"          label="Age"                     sortCol={studentSort.col} sortDir={studentSort.dir} onSort={sortStudent} align="right" />
                       <SortTh col="enrollments"  label="Enrollments"             sortCol={studentSort.col} sortDir={studentSort.dir} onSort={sortStudent} align="right" />
                       <SortTh col="withDiscount" label="With Discount"           sortCol={studentSort.col} sortDir={studentSort.dir} onSort={sortStudent} align="right" />
                       <th className="cls-th">Discount Codes</th>
@@ -435,6 +461,7 @@ export default function DiscountCodes() {
                       <tr key={r.customerId}>
                         <td className="pig-mono">{r.customerId}</td>
                         <td>{`${r.lastName ?? ''}${r.firstName ? ', ' + r.firstName : ''}`.trim() || '—'}</td>
+                        <td className="cls-num">{r.age ?? '—'}</td>
                         <td className="cls-num">{r.enrollments}</td>
                         <td className="cls-num">{r.withDiscount}</td>
                         <td>{r.codes.map(([code, n]) => (n > 1 ? `${code} (x${n})` : code)).join('; ') || '—'}</td>
