@@ -109,7 +109,7 @@ function buildSummary(enrollments) {
   // Per discount code: applications (enrollment rows) and unique students.
   const codes = new Map() // code → { applications, students:Set }
   // Per student: name, enrollments, and the codes they received.
-  const students = new Map() // customer_id → { firstName, lastName, enrollments, withDiscount, codes:Map(code→n) }
+  const students = new Map() // customer_id → { birthdate, earliestStart, enrollments, withDiscount, codes:Map(code→n) }
 
   for (const e of enrollments) {
     const cid = e.customer_id
@@ -126,9 +126,7 @@ function buildSummary(enrollments) {
     let s = students.get(cid)
     if (!s) {
       s = {
-        firstName: e.students?.first_name ?? '',
-        lastName:  e.students?.last_name  ?? '',
-        birthdate: e.students?.birthdate  ?? null,
+        birthdate: e.students?.birthdate ?? null,
         earliestStart: null,
         enrollments: 0,
         withDiscount: 0,
@@ -151,8 +149,6 @@ function buildSummary(enrollments) {
 
   const studentRows = [...students.entries()].map(([customerId, s]) => ({
     customerId,
-    firstName: s.firstName,
-    lastName: s.lastName,
     age: ageAtDate(s.birthdate, s.earliestStart),
     enrollments: s.enrollments,
     withDiscount: s.withDiscount,
@@ -202,13 +198,17 @@ function exportCodeCSV(rows, label) {
 }
 
 function exportStudentCSV(rows, label) {
-  const headers = ['Customer ID', 'First Name', 'Last Name', 'Age at Enrollment', 'Enrollments', 'Enrollments w/ Discount', 'Discount Codes']
+  // One column per discount slot, widened to the student with the most codes.
+  const maxCodes = rows.reduce((m, r) => Math.max(m, r.codes.length), 0)
+  const codeHeaders = Array.from({ length: maxCodes }, (_, i) => `Discount Code ${i + 1}`)
+  const headers = ['Customer ID', 'Age at Enrollment', 'Enrollments', 'Enrollments w/ Discount', ...codeHeaders]
   const csv = [
     headers,
-    ...rows.map(r => [
-      r.customerId, r.firstName, r.lastName, r.age ?? '', r.enrollments, r.withDiscount,
-      r.codes.map(([code, n]) => (n > 1 ? `${code} (x${n})` : code)).join('; '),
-    ]),
+    ...rows.map(r => {
+      const codeCells = r.codes.map(([code, n]) => (n > 1 ? `${code} (x${n})` : code))
+      while (codeCells.length < maxCodes) codeCells.push('')
+      return [r.customerId, r.age ?? '', r.enrollments, r.withDiscount, ...codeCells]
+    }),
   ].map(r => r.map(esc).join(',')).join('\n')
   triggerDownload(csv, `discount-codes-students-${label}-${today()}.csv`)
 }
@@ -226,7 +226,7 @@ export default function DiscountCodes() {
   const [selected, setSelected]             = useState([])
   const [discountedOnly, setDiscountedOnly] = useState(false)
   const [codeSort, setCodeSort]             = useState({ col: 'applications', dir: 'desc' })
-  const [studentSort, setStudentSort]       = useState({ col: 'lastName', dir: 'asc' })
+  const [studentSort, setStudentSort]       = useState({ col: 'customerId', dir: 'asc' })
 
   useEffect(() => { loadPeriods() }, [])
 
@@ -287,7 +287,7 @@ export default function DiscountCodes() {
 
     let query = supabase
       .from('enrollments')
-      .select('customer_id, discount_type, time_period, fiscal_year, events(class_start_date), students(first_name, last_name, birthdate)')
+      .select('customer_id, discount_type, time_period, fiscal_year, events(class_start_date), students(birthdate)')
 
     if (quarters.length > 0 && fys.length > 0) {
       const qList = quarters.map(q => `"${q}"`).join(',')
@@ -324,7 +324,7 @@ export default function DiscountCodes() {
   const visibleStudentRows = useMemo(() => {
     const rows = discountedOnly ? studentRows.filter(r => r.withDiscount > 0) : studentRows
     return sortBy(rows, studentSort.col, studentSort.dir, {
-      lastName:     r => `${(r.lastName ?? '').toLowerCase()} ${(r.firstName ?? '').toLowerCase()}`,
+      customerId:   r => r.customerId,
       age:          r => (r.age == null ? -1 : r.age),
       enrollments:  r => r.enrollments,
       withDiscount: r => r.withDiscount,
@@ -448,11 +448,10 @@ export default function DiscountCodes() {
                 <table className="cls-table">
                   <thead>
                     <tr>
-                      <th className="cls-th">Customer ID</th>
-                      <SortTh col="lastName"     label="Student"                 sortCol={studentSort.col} sortDir={studentSort.dir} onSort={sortStudent} />
-                      <SortTh col="age"          label="Age"                     sortCol={studentSort.col} sortDir={studentSort.dir} onSort={sortStudent} align="right" />
-                      <SortTh col="enrollments"  label="Enrollments"             sortCol={studentSort.col} sortDir={studentSort.dir} onSort={sortStudent} align="right" />
-                      <SortTh col="withDiscount" label="With Discount"           sortCol={studentSort.col} sortDir={studentSort.dir} onSort={sortStudent} align="right" />
+                      <SortTh col="customerId"   label="Customer ID"   sortCol={studentSort.col} sortDir={studentSort.dir} onSort={sortStudent} />
+                      <SortTh col="age"          label="Age"           sortCol={studentSort.col} sortDir={studentSort.dir} onSort={sortStudent} align="right" />
+                      <SortTh col="enrollments"  label="Enrollments"   sortCol={studentSort.col} sortDir={studentSort.dir} onSort={sortStudent} align="right" />
+                      <SortTh col="withDiscount" label="With Discount" sortCol={studentSort.col} sortDir={studentSort.dir} onSort={sortStudent} align="right" />
                       <th className="cls-th">Discount Codes</th>
                     </tr>
                   </thead>
@@ -460,7 +459,6 @@ export default function DiscountCodes() {
                     {visibleStudentRows.map(r => (
                       <tr key={r.customerId}>
                         <td className="pig-mono">{r.customerId}</td>
-                        <td>{`${r.lastName ?? ''}${r.firstName ? ', ' + r.firstName : ''}`.trim() || '—'}</td>
                         <td className="cls-num">{r.age ?? '—'}</td>
                         <td className="cls-num">{r.enrollments}</td>
                         <td className="cls-num">{r.withDiscount}</td>
