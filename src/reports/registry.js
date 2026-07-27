@@ -1,8 +1,15 @@
 import PianoInspiresGrant from './PianoInspiresGrant'
 import UniqueGroupClassesBoard from './UniqueGroupClassesBoard'
 import Demographics from './Demographics'
+import LowIncomeYouthProgram from './LowIncomeYouthProgram'
 
 export const REPORTS = [
+  {
+    id:          'low-income-youth-program',
+    label:       'Low-Income Youth Program (LIYP)',
+    description: 'Unique students, tuition assistance, and ethnicity for sliding-scale youth, YMP, Children’s Chorus, and Teen Jazz Orchestra by fiscal year.',
+    component:   LowIncomeYouthProgram,
+  },
   {
     id:          'piano-inspires',
     label:       'Piano Inspires Grant',

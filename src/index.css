@@ -1033,6 +1033,17 @@
 /* ── Demographics report ── */
 .demo-total-block { margin-bottom: 28px; }
 
+/* ── LIYP group cards ── */
+.liyp-group-card {
+  border: 1px solid var(--color-border, #e2e2e2);
+  border-radius: 10px;
+  padding: 16px 18px;
+  margin-bottom: 20px;
+  background: var(--color-surface, #fff);
+}
+.liyp-group-card .pig-roster-header { margin-top: 0; }
+.liyp-group-card .demo-dims { margin-top: 4px; }
+
 /* ── Demographics scope tabs (Total / Lessons / Group Classes) ── */
 .demo-scope-tabs {
   display: flex;
