@@ -2,8 +2,15 @@ import PianoInspiresGrant from './PianoInspiresGrant'
 import UniqueGroupClassesBoard from './UniqueGroupClassesBoard'
 import Demographics from './Demographics'
 import LowIncomeYouthProgram from './LowIncomeYouthProgram'
+import DiscountCodes from './DiscountCodes'
 
 export const REPORTS = [
+  {
+    id:          'discount-codes',
+    label:       'Discount Codes',
+    description: 'Discount codes applied per fiscal year/quarter — applications and unique students, plus a per-student list. Downloadable CSVs.',
+    component:   DiscountCodes,
+  },
   {
     id:          'low-income-youth-program',
     label:       'Low-Income Youth Program (LIYP)',
