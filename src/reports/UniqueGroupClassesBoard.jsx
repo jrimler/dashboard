@@ -43,6 +43,12 @@ const CATEGORY_MAP = {
 // Any course whose name starts with this prefix is unconditionally tuition-free.
 const YMP_PREFIX = 'Young Musicians Program'
 
+// Ages outside this range are treated as an unknown birthdate rather than a real
+// one. ASAP writes a placeholder birthdate (e.g. 1900-01-01 → age ~126) when the
+// real date is missing; without this guard a single placeholder would flip an
+// entire youth class to Adult. 100 is comfortably above any real student age.
+const MAX_PLAUSIBLE_AGE = 100
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Utilities
 // ─────────────────────────────────────────────────────────────────────────────
@@ -170,11 +176,12 @@ function buildGroups(eventsData, scheduleByEventId, enrollmentsData) {
     let anyAdult        = false
     for (const enr of g.enrichedEnrollments) {
       if (anyAdult) break
-      const bd = studentBirthdates[enr.customer_id]
-      if (!bd) continue
+      const age = ageAtDate(studentBirthdates[enr.customer_id], enr._class_start_date)
+      // Skip missing birthdates and implausible ages (placeholder dates like
+      // 1900-01-01); both count as "no birthdate on record" for this check.
+      if (age === null || age < 0 || age > MAX_PLAUSIBLE_AGE) continue
       hasAnyBirthdate = true
-      const age = ageAtDate(bd, enr._class_start_date)
-      if (age !== null && age >= 19) anyAdult = true
+      if (age >= 19) anyAdult = true
     }
     const ageGroup = (hasAnyBirthdate && !anyAdult) ? 'Youth' : 'Adult'
 
@@ -435,7 +442,8 @@ export default function UniqueGroupClassesBoard() {
             <div className="ugcb-info-section-title">Youth vs. Adult</div>
             <p>
               Each enrolled student's age is calculated as of their event's <strong>class start date</strong>.
-              Students with no birthdate on record are excluded from the age check.
+              Students with no birthdate on record — or an implausible one, such as the
+              1900-01-01 placeholder ASAP writes when a birthdate is missing — are excluded from the age check.
               If every student with a known birthdate is under 19 across all matching events, the class is
               classified as <strong>Youth</strong>; otherwise <strong>Adult</strong>.
               If no enrolled students have a birthdate on record, the class defaults to Adult
