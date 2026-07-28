@@ -14,7 +14,7 @@ export const REPORTS = [
   {
     id:          'low-income-youth-program',
     label:       'Low-Income Youth Program (LIYP)',
-    description: 'Unique students, tuition assistance, and ethnicity for sliding-scale youth, YMP, Children’s Chorus, and Teen Jazz Orchestra by fiscal year.',
+    description: 'Unique students and ethnicity for sliding-scale & merit youth, YMP, Children’s Chorus, and Teen Jazz Orchestra — one or more fiscal years, compared side by side.',
     component:   LowIncomeYouthProgram,
   },
   {

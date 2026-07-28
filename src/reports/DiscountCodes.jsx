@@ -360,15 +360,31 @@ export default function DiscountCodes() {
       <div className="pig-methodology">
         <div className="pig-methodology-title">About this report</div>
         <p>
-          Select one or more fiscal years and/or quarters. The <strong>Discount Code Summary</strong>{' '}
+          A reconciliation tool for checking discount usage against ASAP. Select one or more fiscal
+          years and/or quarters — mixing the two selects any enrollment matching either, so an FY and
+          one of its own quarters will not double-count. The <strong>Discount Code Summary</strong>{' '}
           lists every discount code applied to an enrollment in that timeframe, with how many times it
           was applied (applications) and how many unique students received it. The{' '}
           <strong>Student List</strong> shows every student with an enrollment in the timeframe, their
           age at their earliest enrollment in that timeframe, and the discount codes they received
-          (a missing or placeholder birthdate shows as "—"). Both tables are downloadable as CSVs.
-          "Applications" counts
-          enrollment rows, so a student enrolled in several classes with the same code is counted once
-          per enrollment in the summary but once overall in the unique-student column.
+          (a missing or placeholder birthdate shows as "—"). Codes are shown exactly as ASAP stores
+          them, with no grouping of near-identical names, since the point is to see what was actually
+          applied. Both tables are sortable by any column.
+        </p>
+        <p>
+          "Applications" counts enrollment rows, so a student enrolled in several classes with the same
+          code is counted once per enrollment in the summary but once overall in the unique-student
+          column; a code applied more than once to the same student shows as{' '}
+          <em>code (x2)</em> in their row. An enrollment counts as having no code when the field is
+          blank, a single space, or the literal "0" — all three are ASAP's way of writing "empty". The{' '}
+          <strong>With a discount only</strong> toggle narrows the student list to students who
+          received at least one code.
+        </p>
+        <p>
+          Both tables export to CSV, and each export writes the rows as currently sorted and filtered.
+          The student list is identified by <strong>Customer ID only — no names</strong>, and its CSV
+          spreads each student's codes across <em>Discount Code 1…N</em> columns (widened to the
+          student with the most codes) so the file pivots cleanly in a spreadsheet.
         </p>
       </div>
 

@@ -344,10 +344,11 @@ export default function PianoInspiresGrant() {
               <div className="pig-methodology">
                 <div className="pig-methodology-title">How this number is calculated</div>
                 <p>
-                  This report counts unique students enrolled in any private piano or keyboard
-                  lesson, or any group class with "piano" or "keyboard" in the course name,
-                  during the selected period(s). Each student is counted once regardless of how
-                  many qualifying classes they attended.
+                  This report counts unique students enrolled in any private lesson or group class
+                  whose course name contains "piano" or "keyboard" (case-insensitive) during the
+                  selected period(s) — fiscal years and quarters can be selected together. Each
+                  student is counted once no matter how many qualifying lessons or classes they
+                  took, so the total is students, not enrollments.
                 </p>
                 <p>
                   A student is marked as receiving tuition assistance if any of their qualifying
@@ -355,9 +356,11 @@ export default function PianoInspiresGrant() {
                   was applied to a qualifying enrollment.
                 </p>
                 <p>
-                  Matching course names include any course containing "piano" or "keyboard"
-                  (case-insensitive). To verify which courses were matched, see the Course
-                  Coverage section below.
+                  Because matching is purely on course name, the <strong>Course Coverage</strong>{' '}
+                  section below lists every course that matched in the selected period(s) — check it
+                  to confirm nothing unexpected was swept in or left out. The{' '}
+                  <strong>student roster</strong> underneath names each matched student with their
+                  qualifying courses, tuition-free flag and total discount, and exports to CSV.
                 </p>
               </div>
 

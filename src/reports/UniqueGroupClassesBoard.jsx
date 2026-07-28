@@ -435,8 +435,17 @@ export default function UniqueGroupClassesBoard() {
               Each row is one unique class, identified by the combination of <strong>course name</strong>,{' '}
               <strong>instructor</strong>, <strong>days of week</strong>, <strong>start time</strong>,
               and <strong>end time</strong>. The same course running at a different time or with a different
-              instructor will appear as a separate row. Counts aggregate across all quarters in the
-              selected fiscal year.
+              instructor will appear as a separate row. Counts aggregate across every quarter of the
+              selected fiscal year — or years, since the FY pills are multi-select. Days and times come
+              from the class schedule report; a class with no schedule row on file shows "—" for those
+              fields and still groups correctly.
+            </p>
+            <p>
+              <strong>Total Enrolled</strong> and <strong>Total Tuition Free</strong> count enrollments,
+              not unique students: a student who takes the same class in two quarters counts twice.
+              The filter pills above the table narrow it by tuition status and age group, the summary
+              row totals only the visible rows, and <strong>Export CSV</strong> writes exactly those
+              rows.
             </p>
 
             <div className="ugcb-info-section-title">Youth vs. Adult</div>
@@ -452,10 +461,10 @@ export default function UniqueGroupClassesBoard() {
 
             <div className="ugcb-info-section-title">Tuition-Free Status</div>
             <p>
-              A class is tuition-free if every enrollment across all of its matching events has a net cost
-              of $15 or less (the dashboard-wide threshold). Additionally, any course whose name begins
-              with <em>"Young Musicians Program"</em> is unconditionally marked tuition-free, regardless
-              of enrollment amounts.
+              A class is tuition-free if it has at least one enrollment and every enrollment across all
+              of its matching events has a net cost of $15 or less (the dashboard-wide threshold).
+              Additionally, any course whose name begins with <em>"Young Musicians Program"</em> is
+              unconditionally marked tuition-free, regardless of enrollment amounts.
             </p>
 
             <div className="ugcb-info-section-title">Category</div>
