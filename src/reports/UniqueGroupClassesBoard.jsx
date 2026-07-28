@@ -331,14 +331,25 @@ export default function UniqueGroupClassesBoard() {
 
     const fys = selectedPeriods.map(p => p.value)
 
-    // 1. Fetch CLASS events for the selected FYs
-    const { data: eventsData, error: eventsError } = await supabase
-      .from('events')
-      .select('event_id, course_name, department, primary_instructor, class_start_date, time_period, fiscal_year')
-      .eq('activity_type', 'CLASS')
-      .in('fiscal_year', fys)
-
-    if (eventsError) { setError(eventsError.message); setLoading(false); return }
+    // 1. Fetch CLASS events for the selected FYs. Paginated: Supabase caps an
+    //    unpaginated response at 1000 rows and returns no error, and three or
+    //    more fiscal years already exceed that — the report was silently
+    //    dropping classes past the cap.
+    const EVENT_PAGE = 1000
+    let eventFrom = 0, eventsData = []
+    while (true) {
+      const { data, error } = await supabase
+        .from('events')
+        .select('event_id, course_name, department, primary_instructor, class_start_date, time_period, fiscal_year')
+        .eq('activity_type', 'CLASS')
+        .in('fiscal_year', fys)
+        .order('event_id')
+        .range(eventFrom, eventFrom + EVENT_PAGE - 1)
+      if (error) { setError(error.message); setLoading(false); return }
+      eventsData = eventsData.concat(data)
+      if (data.length < EVENT_PAGE) break
+      eventFrom += EVENT_PAGE
+    }
 
     const eventIds = eventsData.map(e => e.event_id)
     if (eventIds.length === 0) { setRows([]); setLoading(false); return }
