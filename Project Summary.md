@@ -179,14 +179,21 @@ src/
     Enrollment.jsx           Working — see below
     Retention.jsx            Working — see below
     Classes.jsx              Working — see below
-    SpecializedReporting.jsx Working — report picker shell; see below
+    SpecializedReporting.jsx Report gallery at /reports — cards from the REPORTS registry; see below
+    ReportDetail.jsx         Renders one report at /reports/:reportId (looks it up in the registry)
   reports/
+    registry.js                     REPORTS array — id/label/description/component for each report; drives the gallery + routing
     PianoInspiresGrant.jsx          Specialized report — see below
     UniqueGroupClassesBoard.jsx     Specialized report — see below
     Demographics.jsx                Specialized report — see below
+    LowIncomeYouthProgram.jsx       Specialized report — see below
+    DiscountCodes.jsx               Specialized report — see below
   App.jsx                    Auth gating + sidebar nav shell (React Router v6)
   main.jsx
   index.css
+scripts/                     Local analysis tooling (Node, service_role key) — NOT shipped to the browser
+  db.mjs                     Authenticated Supabase client from .env SUPABASE_SERVICE_ROLE_KEY (bypasses RLS; read-only grant)
+  query.mjs                  Quick CLI table query: node scripts/query.mjs <table> "col=op.value" "select=..." limit=N
 supabase/
   migrations/
     001_initial_schema.sql   students, events, enrollments tables + indexes
@@ -195,6 +202,8 @@ supabase/
 netlify.toml                 SPA redirect (/* → /index.html)
 .env.example                 Env var template
 ```
+
+**Local data tooling:** `scripts/db.mjs` / `scripts/query.mjs` let a developer query the live Supabase DB from the command line using a `service_role` key in `.env` (gitignored). This required a one-time `GRANT SELECT ... TO service_role` in the Supabase SQL editor — the tables were originally readable only by the `authenticated` role, so the app worked but scripts (and the anon key) got "permission denied." The key bypasses Row Level Security, so these files must never be imported into browser code.
 
 ### Sidebar nav order
 Reports → Enrollment → Retention → Classes → Upload
@@ -311,9 +320,11 @@ Continuing is shown as `—` if the preceding quarter has no data in the DB, or 
 
 ---
 
-### Specialized Reporting (`/reports`)
+### Specialized Reporting (`/reports` + `/reports/:reportId`)
 
-A report-picker shell. Buttons at the top select which report to display below. Adding a new report requires only adding an entry to the `REPORTS` array in `SpecializedReporting.jsx` and creating the component in `src/reports/`.
+`/reports` (`SpecializedReporting.jsx`) is a **gallery** of report cards — one button per entry in the `REPORTS` array (`src/reports/registry.js`), each showing the report's label and description. Clicking a card navigates to `/reports/:reportId`, where `ReportDetail.jsx` looks the id up in the registry and renders that report's component (redirecting to `/reports` if the id is unknown).
+
+Adding a new report requires only: create the component in `src/reports/`, then add an `{ id, label, description, component }` entry to the `REPORTS` array in `registry.js`. Report order in the gallery follows array order.
 
 ---
 
@@ -343,7 +354,7 @@ Counts unique students enrolled in any piano or keyboard lesson or group class f
 
 **Tuition-free:** All enrollments across all matching events are tuition-free (`is_tuition_free = true`), OR the course name starts with `"Young Musicians Program"` (hardcoded override).
 
-**Youth vs. Adult:** Each enrolled student's age is calculated as of that enrollment's event's `class_start_date`. Students without a birthdate on record are excluded from the check. If every student with a known birthdate is under 19 across all matching events, the class is Youth; otherwise Adult. Defaults to Adult if no birthdates are known.
+**Youth vs. Adult:** Each enrolled student's age is calculated as of that enrollment's event's `class_start_date`. Students without a birthdate on record — **or with an implausible age (outside 0–100)** — are excluded from the check; ASAP writes a `1900-01-01` placeholder (age ~126) when a birthdate is missing, and without this guard a single placeholder flipped whole youth classes to Adult (this was the Teen Jazz Orchestra bug, fixed via `MAX_PLAUSIBLE_AGE = 100`). If every student with a confirmed age is under 19 across all matching events, the class is Youth; otherwise Adult. Defaults to Adult if no ages are known.
 
 **Filter pills:** Two groups — Tuition Status (Tuition Free / Fee Based) and Age Group (Youth / Adult) — all active by default.
 
@@ -379,6 +390,30 @@ Summarizes age, gender, ethnicity, and household income for **unique students** 
 
 ---
 
+#### Low-Income Youth Program (LIYP)
+
+Grant report on four low-income youth cohorts for a **single selected fiscal year** (FY pills only). For each group it shows **unique students** (counted once per FY; every enrollment already qualifies since only ENROLLED/PEND import) and an **ethnicity** breakdown reusing the Demographics categories (Hispanic + Latinx merged; percentages out of the responded base, No Response excluded from the base). A de-duplicated **combined** total across all four groups is shown last. One CSV export covers all groups + combined.
+
+Groups (a student can appear in more than one):
+- **Sliding-Scale & Merit Youth (ages 4–18)** — students aged 4–18 with ≥1 enrollment whose `discount_type` contains a `Child<NN>` token (regex `/(?:^|[ _])Child\d+(?:[ _]|$)/`) **or** the word "Merit" (`/merit/i`). The `Child<NN>` rule deliberately includes the older Mission/Richmond satellite variants (e.g. `Mission_FA2022 Child46_2022_Private`), which only affects FY23. Merit codes are relabelled every term (`Merit - Fall 2025`, `Merit Winter_2026`, `MERIT Richmond_Summer_2022`, `Mission Merit Scholars FA2022_Private`, …), hence the loose substring match; no Merit code carries a `Child<NN>` token, so the two rules never double-count an enrollment. Age is measured at each enrollment's `class_start_date`; students whose age can't be confirmed 4–18 (missing/placeholder birthdate, same 0–100 guard as the Board report) are excluded and reported in a separate note. Adding Merit raised the group by ~17–25 unique students per FY (FY26: 200 → 220).
+- **YMP** — enrolled in `Young Musicians Program / Saturday Play! (Ensemble)`, `... (Theory)`, or `Mission District Young Musicians Program / Saturday Play!`.
+- **Children's Chorus** / **Teen Jazz Orchestra** — enrolled in the class of that exact name.
+
+**Tuition assistance:** originally shown per group (dollars from `total_discount` for Sliding-Scale + YMP; fully-subsidized headcount for the free programs), but **removed at the user's request** — the tuition-free programs record `$0` discounts inconsistently in ASAP (a billing-practice artifact, not a real change in aid), so the dollar/subsidized figures confused more than helped. The report now shows only unique students + ethnicity.
+
+---
+
+#### Discount Codes
+
+Reconciliation tool. Select any fiscal years and/or quarters (multi-select FY + quarter pills). Blank / `" "` / `"0"` `discount_type` values are treated as "no code." Two tables, each with its own CSV export:
+
+- **Discount Code Summary** — one row per code applied in the timeframe: **Applications** (enrollment rows the code was applied to) and **Unique Students** who received it. Sortable.
+- **Student List** — one row per student with any enrollment in the timeframe (Customer ID only, no names): **Age** at their earliest enrollment in the timeframe (missing/placeholder → `—`), total enrollments, enrollments with a discount, and the discount codes received. A "With a discount only" toggle filters to students who received ≥1 code. On-screen the codes sit in one cell; the **CSV spreads them across `Discount Code 1..N` columns** (widened to the student with the most codes) for easy spreadsheet pivoting.
+
+Built to investigate a sliding-scale count discrepancy (a report of 200 vs a staffer's 246 for FY26): our DB holds only ~202 students with `Child…` codes in FY26, so the gap is upstream (snapshot drift or a different definition/source), not the report logic.
+
+---
+
 ## Known Issues / Design Decisions
 
 | Issue | Status | Notes |
@@ -397,3 +432,6 @@ Summarizes age, gender, ethnicity, and household income for **unique students** 
 | Initial page load slowness | Fixed | Classes and Enrollment now defer heavy fetches until a period is selected |
 | Preceding quarter undefined for fiscal year periods | By design | Continuing row shows `—` for FY-level columns in Retention |
 | Auth session flash on load | Fixed | Session state initialises as `undefined`; app renders nothing until resolved |
+| Placeholder birthdates (`1900-01-01`, age ~126) misclassifying youth classes | Fixed (July 2026) | Ages outside 0–100 treated as unknown (`MAX_PLAUSIBLE_AGE`); Teen Jazz Orchestra was showing Adult in the Board report. Same guard applied in LIYP and Discount Codes |
+| Tuition-free programs record `$0` discount inconsistently in ASAP | Accepted / design | YMP, Children's Chorus, Teen Jazz often store `amount=0, total_discount=0` (varies by year — a billing-practice artifact). Summing discounts undercounts them; LIYP therefore dropped tuition-assistance figures entirely |
+| Tables readable only by `authenticated` role (anon/service_role denied) | Fixed (July 2026) | One-time `GRANT SELECT ... TO service_role` in Supabase SQL editor enables local `scripts/` querying; service_role key kept in gitignored `.env` |

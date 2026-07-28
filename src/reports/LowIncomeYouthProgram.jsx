@@ -13,6 +13,19 @@ import { fySortKey } from '../utils/periodUtils'
 // codes do NOT match because "Child" there is not followed by digits.
 const SLIDING_RE = /(?:^|[ _])Child\d+(?:[ _]|$)/
 
+// Merit scholarship codes. Every year labels them differently ("Merit - Fall
+// 2025", "Merit Winter_2026", "MERIT Richmond_Summer_2022", "Mission Merit
+// Scholars FA2022_Private", …), so any code containing the word "Merit"
+// qualifies. No Merit code also carries a Child<NN> token, so the two rules
+// never double-count the same enrollment.
+const MERIT_RE = /merit/i
+
+// An enrollment qualifies a student for the sliding-scale/merit youth group.
+function isSlidingOrMerit(discountType) {
+  const dt = discountType ?? ''
+  return SLIDING_RE.test(dt) || MERIT_RE.test(dt)
+}
+
 const YMP_COURSES = new Set([
   'Young Musicians Program / Saturday Play! (Ensemble)',
   'Young Musicians Program / Saturday Play! (Theory)',
@@ -30,7 +43,7 @@ const MAX_AGE = 18
 const MAX_PLAUSIBLE_AGE = 100
 
 const GROUPS = [
-  { id: 'sliding', title: 'Sliding-Scale Youth (ages 4–18)', ageFiltered: true  },
+  { id: 'sliding', title: 'Sliding-Scale & Merit Youth (ages 4–18)', ageFiltered: true  },
   { id: 'ymp',     title: 'Young Musicians Program (YMP)',    ageFiltered: false },
   { id: 'chorus',  title: "Children's Chorus",               ageFiltered: false },
   { id: 'teen',    title: 'Teen Jazz Orchestra',             ageFiltered: false },
@@ -113,7 +126,7 @@ function buildReport(enrollments) {
   // Per-group accumulators (customer_id → { ethnicity })
   const acc = {}
   for (const g of GROUPS) acc[g.id] = { students: new Map() }
-  const slidingSeen     = new Set()  // any customer with a sliding-scale discount, any age
+  const slidingSeen     = new Set()  // any customer with a sliding-scale or merit discount, any age
   const combinedStudents = new Map() // deduped union across all four groups
 
   function addMember(groupId, cid, student) {
@@ -135,8 +148,9 @@ function buildReport(enrollments) {
     const course  = e.events?.course_name ?? null
     const dt      = e.discount_type ?? ''
 
-    // 1. Sliding-scale youth: has a Child<NN> discount AND age 4–18 at class start.
-    if (SLIDING_RE.test(dt)) {
+    // 1. Sliding-scale/merit youth: has a Child<NN> or Merit discount AND age
+    //    4–18 at class start.
+    if (isSlidingOrMerit(dt)) {
       slidingSeen.add(cid)
       const age = ageAtDate(student.birthdate, e.events?.class_start_date)
       if (age !== null && age >= MIN_AGE && age <= MAX_AGE && age <= MAX_PLAUSIBLE_AGE) {
@@ -151,7 +165,7 @@ function buildReport(enrollments) {
     if (course === TEEN_JAZZ) addMember('teen', cid, student)
   }
 
-  // Sliding-scale students dropped because their age couldn't be confirmed 4–18.
+  // Sliding-scale/merit students dropped because their age couldn't be confirmed 4–18.
   const slidingExcludedAge = [...slidingSeen].filter(cid => !acc.sliding.students.has(cid)).length
 
   const groups = GROUPS.map(g => ({
@@ -349,11 +363,12 @@ export default function LowIncomeYouthProgram() {
               each group they qualify for. A student may appear in more than one group.
             </p>
             <ul>
-              <li><strong>Sliding-Scale Youth</strong> — students aged 4–18 with at least one
-                enrollment carrying a sliding-scale child discount (any <code>Child&lt;NN&gt;</code>
-                code, including the older Mission/Richmond satellite variants). Age is measured at the
-                enrollment's class start date; students whose age can't be confirmed 4–18 (missing or
-                placeholder birthdate) are excluded and counted separately below.</li>
+              <li><strong>Sliding-Scale &amp; Merit Youth</strong> — students aged 4–18 with at least
+                one enrollment carrying a sliding-scale child discount (any <code>Child&lt;NN&gt;</code>
+                code, including the older Mission/Richmond satellite variants) <em>or</em> a Merit
+                scholarship (any code containing "Merit"). Age is measured at the enrollment's class
+                start date; students whose age can't be confirmed 4–18 (missing or placeholder
+                birthdate) are excluded and counted separately below.</li>
               <li><strong>YMP</strong> — students enrolled in Young Musicians Program / Saturday Play!
                 (Ensemble or Theory) or Mission District YMP / Saturday Play!.</li>
               <li><strong>Children's Chorus</strong> and <strong>Teen Jazz Orchestra</strong> —
@@ -412,10 +427,10 @@ export default function LowIncomeYouthProgram() {
                 <div className="pig-methodology" style={{ marginTop: 0 }}>
                   <p style={{ margin: 0 }}>
                     <strong>Note:</strong> {report.slidingExcludedAge} student
-                    {report.slidingExcludedAge !== 1 ? 's' : ''} with a sliding-scale discount
+                    {report.slidingExcludedAge !== 1 ? 's' : ''} with a sliding-scale or Merit discount
                     {report.slidingExcludedAge !== 1 ? ' were' : ' was'} excluded from the Sliding-Scale
-                    Youth group because their age couldn't be confirmed as 4–18 (missing or placeholder
-                    birthdate).
+                    &amp; Merit Youth group because their age couldn't be confirmed as 4–18 (missing or
+                    placeholder birthdate).
                   </p>
                 </div>
               )}
