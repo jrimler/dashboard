@@ -199,6 +199,7 @@ supabase/
     001_initial_schema.sql   students, events, enrollments tables + indexes
     002_class_schedule.sql   class_schedule table + index (FK → events)
     003_grant_delete_enrollments.sql   DELETE grant for replace-by-quarter uploads
+CLAUDE.md                    Working agreement: ship-every-change workflow, verification rules, ASAP gotchas
 netlify.toml                 SPA redirect (/* → /index.html)
 .env.example                 Env var template
 ```
