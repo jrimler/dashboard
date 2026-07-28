@@ -106,8 +106,8 @@ function PeriodSelector({ fyPeriods, quarterGroups, isSelected, toggle, onClear,
 // ─────────────────────────────────────────────────────────────────────────────
 
 function buildSummary(enrollments) {
-  // Per discount code: applications (enrollment rows) and unique students.
-  const codes = new Map() // code → { applications, students:Set }
+  // Per discount code: enrollments (rows the code was applied to) and unique students.
+  const codes = new Map() // code → { enrollments, students:Set }
   // Per student: name, enrollments, and the codes they received.
   const students = new Map() // customer_id → { birthdate, earliestStart, enrollments, withDiscount, codes:Map(code→n) }
 
@@ -117,8 +117,8 @@ function buildSummary(enrollments) {
 
     if (code) {
       let c = codes.get(code)
-      if (!c) { c = { applications: 0, students: new Set() } ; codes.set(code, c) }
-      c.applications += 1
+      if (!c) { c = { enrollments: 0, students: new Set() } ; codes.set(code, c) }
+      c.enrollments += 1
       if (cid) c.students.add(cid)
     }
 
@@ -145,7 +145,7 @@ function buildSummary(enrollments) {
   }
 
   const codeRows = [...codes.entries()]
-    .map(([code, c]) => ({ code, applications: c.applications, uniqueStudents: c.students.size }))
+    .map(([code, c]) => ({ code, enrollments: c.enrollments, uniqueStudents: c.students.size }))
 
   const studentRows = [...students.entries()].map(([customerId, s]) => ({
     customerId,
@@ -191,8 +191,8 @@ function SortTh({ col, label, align, sortCol, sortDir, onSort }) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function exportCodeCSV(rows, label) {
-  const headers = ['Discount Code', 'Applications', 'Unique Students']
-  const csv = [headers, ...rows.map(r => [r.code, r.applications, r.uniqueStudents])]
+  const headers = ['Discount Code', 'Enrollments', 'Unique Students']
+  const csv = [headers, ...rows.map(r => [r.code, r.enrollments, r.uniqueStudents])]
     .map(r => r.map(esc).join(',')).join('\n')
   triggerDownload(csv, `discount-codes-summary-${label}-${today()}.csv`)
 }
@@ -225,7 +225,7 @@ export default function DiscountCodes() {
   const [error, setError]                   = useState(null)
   const [selected, setSelected]             = useState([])
   const [discountedOnly, setDiscountedOnly] = useState(false)
-  const [codeSort, setCodeSort]             = useState({ col: 'applications', dir: 'desc' })
+  const [codeSort, setCodeSort]             = useState({ col: 'enrollments', dir: 'desc' })
   const [studentSort, setStudentSort]       = useState({ col: 'customerId', dir: 'asc' })
 
   useEffect(() => { loadPeriods() }, [])
@@ -317,7 +317,7 @@ export default function DiscountCodes() {
 
   const sortedCodeRows = useMemo(() => sortBy(codeRows, codeSort.col, codeSort.dir, {
     code:           r => r.code.toLowerCase(),
-    applications:   r => r.applications,
+    enrollments:    r => r.enrollments,
     uniqueStudents: r => r.uniqueStudents,
   }), [codeRows, codeSort])
 
@@ -348,7 +348,7 @@ export default function DiscountCodes() {
   }
 
   const fileLabel = selected.map(p => p.value.replace(/\s+/g, '-')).join('_') || 'export'
-  const totalApplications = codeRows.reduce((s, r) => s + r.applications, 0)
+  const totalEnrollments = codeRows.reduce((s, r) => s + r.enrollments, 0)
   const hasData = fyPeriods.length > 0 || quarterGroups.length > 0
 
   if (periodsLoading) return <p className="coming-soon">Loading…</p>
@@ -363,8 +363,8 @@ export default function DiscountCodes() {
           A reconciliation tool for checking discount usage against ASAP. Select one or more fiscal
           years and/or quarters — mixing the two selects any enrollment matching either, so an FY and
           one of its own quarters will not double-count. The <strong>Discount Code Summary</strong>{' '}
-          lists every discount code applied to an enrollment in that timeframe, with how many times it
-          was applied (applications) and how many unique students received it. The{' '}
+          lists every discount code applied to an enrollment in that timeframe, with how many
+          enrollments it was applied to and how many unique students received it. The{' '}
           <strong>Student List</strong> shows every student with an enrollment in the timeframe, their
           age at their earliest enrollment in that timeframe, and the discount codes they received
           (a missing or placeholder birthdate shows as "—"). Codes are shown exactly as ASAP stores
@@ -372,9 +372,9 @@ export default function DiscountCodes() {
           applied. Both tables are sortable by any column.
         </p>
         <p>
-          "Applications" counts enrollment rows, so a student enrolled in several classes with the same
-          code is counted once per enrollment in the summary but once overall in the unique-student
-          column; a code applied more than once to the same student shows as{' '}
+          The <strong>Enrollments</strong> column counts enrollment rows, so a student enrolled in
+          several classes with the same code is counted once per enrollment there but once overall in
+          the unique-student column; a code applied more than once to the same student shows as{' '}
           <em>code (x2)</em> in their row. An enrollment counts as having no code when the field is
           blank, a single space, or the literal "0" — all three are ASAP's way of writing "empty". The{' '}
           <strong>With a discount only</strong> toggle narrows the student list to students who
@@ -411,7 +411,7 @@ export default function DiscountCodes() {
               <div className="pig-roster-header">
                 <span className="pig-roster-title">
                   Discount Code Summary — {codeRows.length} code{codeRows.length !== 1 ? 's' : ''},{' '}
-                  {totalApplications.toLocaleString()} application{totalApplications !== 1 ? 's' : ''}
+                  {totalEnrollments.toLocaleString()} enrollment{totalEnrollments !== 1 ? 's' : ''}
                 </span>
                 <button className="btn-secondary" onClick={() => exportCodeCSV(sortedCodeRows, fileLabel)}>
                   Export CSV
@@ -425,7 +425,7 @@ export default function DiscountCodes() {
                     <thead>
                       <tr>
                         <SortTh col="code"           label="Discount Code"   sortCol={codeSort.col} sortDir={codeSort.dir} onSort={sortCode} />
-                        <SortTh col="applications"   label="Applications"    sortCol={codeSort.col} sortDir={codeSort.dir} onSort={sortCode} align="right" />
+                        <SortTh col="enrollments"    label="Enrollments"     sortCol={codeSort.col} sortDir={codeSort.dir} onSort={sortCode} align="right" />
                         <SortTh col="uniqueStudents" label="Unique Students" sortCol={codeSort.col} sortDir={codeSort.dir} onSort={sortCode} align="right" />
                       </tr>
                     </thead>
@@ -433,7 +433,7 @@ export default function DiscountCodes() {
                       {sortedCodeRows.map(r => (
                         <tr key={r.code}>
                           <td className="cls-course">{r.code}</td>
-                          <td className="cls-num">{r.applications.toLocaleString()}</td>
+                          <td className="cls-num">{r.enrollments.toLocaleString()}</td>
                           <td className="cls-num">{r.uniqueStudents.toLocaleString()}</td>
                         </tr>
                       ))}

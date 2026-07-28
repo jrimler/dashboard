@@ -110,9 +110,9 @@ function deltaClass(raw) {
 //
 // Two metrics per family per fiscal year:
 //   students     — unique customer_ids who received any code in the family
-//   applications — enrollment rows the codes were applied to
-// Unique students is the comparable measure across years; applications tracks
-// billing practice as much as reality (YMP jumped 124 → 341 applications from
+//   enrollments  — enrollment rows the codes were applied to
+// Unique students is the comparable measure across years; enrollments track
+// billing practice as much as reality (YMP jumped 124 → 341 enrollments from
 // FY23 to FY24 while unique students went 46 → 48, purely because
 // "YMP - 100% Group" started being applied per enrollment).
 // ─────────────────────────────────────────────────────────────────────────────
@@ -125,7 +125,7 @@ function buildTrends(enrollments, fys) {
   const anyDiscount = fys.map(() => new Set())
   const allStudents = fys.map(() => new Set())
   const allEnrollments = fys.map(() => 0)
-  const unmatchedCodes = new Map()  // code → applications
+  const unmatchedCodes = new Map()  // code → enrollments
 
   for (const e of enrollments) {
     const i = fyIndex.get(e.fiscal_year)
@@ -389,15 +389,16 @@ export default function DiscountTrends() {
               blank, a single space, or the literal "0" — all three are ASAP's way of writing empty.
             </p>
 
-            <div className="ugcb-info-section-title">Students vs. applications</div>
+            <div className="ugcb-info-section-title">Unique students vs. enrollments</div>
             <p>
               <strong>Unique students</strong> counts each student once per family per year, and is
-              the measure to compare across years. <strong>Applications</strong> counts enrollment
-              rows a code was applied to, which tracks billing practice as much as reality: YMP went
-              from 124 to 341 applications between FY23 and FY24 while unique students went 46 to 48,
-              purely because <code>YMP - 100% Group</code> started being applied per enrollment.
-              A student can appear in more than one family, so families do not sum to{' '}
-              <em>Any discount</em>.
+              the measure to compare across years. <strong>Enrollments</strong> counts the enrollment
+              rows a code was applied to, so one student taking three discounted classes counts once
+              as a student and three times as enrollments. That measure tracks billing practice as
+              much as reality: YMP went from 124 to 341 discounted enrollments between FY23 and FY24
+              while unique students went 46 to 48, purely because <code>YMP - 100% Group</code>{' '}
+              started being applied per enrollment. A student can appear in more than one family, so
+              families do not sum to <em>Any discount</em>.
             </p>
             <p>
               Discount <strong>dollar amounts are deliberately not shown</strong>. The
@@ -465,11 +466,11 @@ export default function DiscountTrends() {
                     Unique students
                   </button>
                   <button
-                    className={`period-pill${metric === 'applications' ? ' active' : ''}`}
-                    onClick={() => setMetric('applications')}
+                    className={`period-pill${metric === 'enrollments' ? ' active' : ''}`}
+                    onClick={() => setMetric('enrollments')}
                     title="Enrollment rows a code was applied to"
                   >
-                    Applications
+                    Enrollments
                   </button>
                   <button className="btn-secondary" onClick={() => exportCSV(trends, orderedFYs, metric)}>
                     Export CSV
@@ -487,7 +488,7 @@ export default function DiscountTrends() {
                           <th key={ci} className="rt-period-hdr">
                             <div className="rt-period-name">{col.fy}</div>
                             <div className="rt-period-sub">
-                              {metric === 'students' ? 'Students' : 'Applications'}
+                              {metric === 'students' ? 'Students' : 'Enrollments'}
                             </div>
                           </th>
                         ) : (

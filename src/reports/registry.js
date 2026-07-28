@@ -15,7 +15,7 @@ export const REPORTS = [
   {
     id:          'discount-codes',
     label:       'Discount Codes',
-    description: 'Discount codes applied per fiscal year/quarter — applications and unique students, plus a per-student list. Downloadable CSVs.',
+    description: 'Discount codes applied per fiscal year/quarter — enrollments and unique students, plus a per-student list. Downloadable CSVs.',
     component:   DiscountCodes,
   },
   {
