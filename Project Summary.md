@@ -325,7 +325,7 @@ Continuing is shown as `—` if the preceding quarter has no data in the DB, or 
 
 `/reports` (`SpecializedReporting.jsx`) is a **gallery** of report cards — one button per entry in the `REPORTS` array (`src/reports/registry.js`), each showing the report's label and description. Clicking a card navigates to `/reports/:reportId`, where `ReportDetail.jsx` looks the id up in the registry and renders that report's component (redirecting to `/reports` if the id is unknown).
 
-Adding a new report requires only: create the component in `src/reports/`, then add an `{ id, label, description, component }` entry to the `REPORTS` array in `registry.js`. Report order in the gallery follows array order.
+Adding a new report requires only: create the component in `src/reports/`, then add an `{ id, label, description, component }` entry to the `REPORTS` array in `registry.js`. Report order in the gallery follows array order, and the array is kept alphabetical by label — insert a new entry in its alphabetical slot.
 
 ---
 
