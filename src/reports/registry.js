@@ -3,8 +3,15 @@ import UniqueGroupClassesBoard from './UniqueGroupClassesBoard'
 import Demographics from './Demographics'
 import LowIncomeYouthProgram from './LowIncomeYouthProgram'
 import DiscountCodes from './DiscountCodes'
+import DiscountTrends from './DiscountTrends'
 
 export const REPORTS = [
+  {
+    id:          'discount-trends',
+    label:       'Discount Trends',
+    description: 'How each kind of discount has grown or shrunk across fiscal years — ASAP’s many code spellings collapsed into standing program families.',
+    component:   DiscountTrends,
+  },
   {
     id:          'discount-codes',
     label:       'Discount Codes',

@@ -409,6 +409,20 @@ Groups (a student can appear in more than one):
 
 ---
 
+#### Discount Trends
+
+How each kind of discount has ebbed and flowed across fiscal years. ASAP relabels discount codes nearly every term (308 distinct spellings across FY23–FY26), so codes are collapsed into **families** by an ordered rule list at the top of `DiscountTrends.jsx` — first match wins, order matters (Merit before the branch-prefixed satellite codes, MDYMP before the generic YMP token). Multi-select FY pills, defaulting to every FY on file.
+
+Families: Sliding Scale — Youth (`Child<NN>`), Sliding Scale — Adult (`Adult<NN>`), Merit Scholarship, YMP (**includes MDYMP** — a different class under the same umbrella), CMP (fee-paying YMP — YMP students who pay rather than hold a scholarship; kept separate so the paying share stays visible), Seniors, Faculty / Staff, Family $3, Multiple Classes, SFUSD Teacher, Promotions, Children's Chorus. Coverage is 100% of counted codes.
+
+**Unmatched vs. excluded:** a code matching no pattern lands in a visible `Unmatched` row plus a callout listing the codes, so a new ASAP label surfaces as an actionable number instead of silently deflating a family (same principle as `INCOME_MAP`). Three one-offs are *deliberately excluded* from the report by a separate rule list — `FMS Pay`, `Bebop!`, `30th Street OAC` (293 applications total, at the user's direction) — which keeps `Unmatched` meaning "nobody has classified this yet."
+
+**Metric toggle — Unique Students / Applications.** Unique students (once per family per FY) is the cross-year comparable measure; applications counts enrollment rows and tracks billing practice as much as reality (YMP went 124 → 341 applications FY23 → FY24 while unique students went 46 → 48, purely because `YMP - 100% Group` began being applied per enrollment). A student can appear in several families, so families don't sum to *Any discount*. **Dollar amounts are deliberately not shown** — same `$0`-discount artifact that removed them from LIYP.
+
+**Table:** one column per FY with a Δ column (change + % change) between consecutive years, reusing the Enrollment/LIYP `report-table` styling. Click a family to expand it: sliding-scale rows expand to **tier** (`Tier 46` — the number is discount depth), everything else to the raw ASAP codes, which is what makes rate changes legible (Seniors moved 30% → 20% between the FY23 satellite codes and `Seniors_20%_2025`). Two summary rows — *Any discount* (de-duplicated across families) and *All enrolled* — let a family be read as a share of the whole. CSV export writes every family plus its detail codes on the current metric, with a Level column for pivoting.
+
+---
+
 #### Discount Codes
 
 Reconciliation tool. Select any fiscal years and/or quarters (multi-select FY + quarter pills). Blank / `" "` / `"0"` `discount_type` values are treated as "no code." Two tables, each with its own CSV export:
