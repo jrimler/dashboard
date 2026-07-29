@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
 import { fySortKey } from '../utils/periodUtils'
+import { NO_RESPONSE, ethnicityLabelFor } from './demographicCategories'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Group definitions (LIYP grant categories)
@@ -49,15 +50,6 @@ const GROUPS = [
   { id: 'teen',    title: 'Teen Jazz Orchestra',             ageFiltered: false },
 ]
 
-const NO_RESPONSE = 'No Response'
-
-// Ethnicity labels that name the same group and report as one category
-// (kept identical to the Demographics report).
-const ETHNICITY_ALIASES = {
-  'hispanic': 'Hispanic/Latinx',
-  'latinx':   'Hispanic/Latinx',
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Utilities
 // ─────────────────────────────────────────────────────────────────────────────
@@ -80,13 +72,6 @@ function ageAtDate(birthdateStr, referenceDateStr) {
   let age = ry - by
   if (rm < bm || (rm === bm && rd < bd)) age--
   return age
-}
-
-// Ethnicity label with Hispanic/Latinx aliases merged, mirroring Demographics.
-function ethnicityLabelFor(raw) {
-  const v = String(raw ?? '').trim()
-  if (v === '') return NO_RESPONSE
-  return ETHNICITY_ALIASES[v.toLowerCase()] ?? v
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

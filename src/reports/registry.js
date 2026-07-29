@@ -4,6 +4,7 @@ import Demographics from './Demographics'
 import LowIncomeYouthProgram from './LowIncomeYouthProgram'
 import DiscountCodes from './DiscountCodes'
 import DiscountTrends from './DiscountTrends'
+import NeighborhoodChoirDemographics from './NeighborhoodChoirDemographics'
 
 // Order here is the order the cards appear on the Reports page — keep it
 // alphabetical by label so a growing list stays easy to scan.
@@ -31,6 +32,12 @@ export const REPORTS = [
     label:       'Low-Income Youth Program (LIYP)',
     description: 'Unique students and ethnicity for sliding-scale & merit youth, YMP, Children’s Chorus, and Teen Jazz Orchestra — one or more fiscal years, compared side by side.',
     component:   LowIncomeYouthProgram,
+  },
+  {
+    id:          'neighborhood-choir-demographics',
+    label:       'Neighborhood Choir Program Demographics',
+    description: 'Ethnicity, gender, and low-income share of unique students in Neighborhood Choirs for Older Adults and Adults with Disabilities, by fiscal year.',
+    component:   NeighborhoodChoirDemographics,
   },
   {
     id:          'piano-inspires',

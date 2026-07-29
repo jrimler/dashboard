@@ -183,10 +183,12 @@ src/
     ReportDetail.jsx         Renders one report at /reports/:reportId (looks it up in the registry)
   reports/
     registry.js                     REPORTS array — id/label/description/component for each report; drives the gallery + routing
+    demographicCategories.js        Shared income/ethnicity/gender category definitions (see below)
     PianoInspiresGrant.jsx          Specialized report — see below
     UniqueGroupClassesBoard.jsx     Specialized report — see below
     Demographics.jsx                Specialized report — see below
     LowIncomeYouthProgram.jsx       Specialized report — see below
+    NeighborhoodChoirDemographics.jsx  Specialized report — see below
     DiscountCodes.jsx               Specialized report — see below
   App.jsx                    Auth gating + sidebar nav shell (React Router v6)
   main.jsx
@@ -194,6 +196,7 @@ src/
 scripts/                     Local analysis tooling (Node, service_role key) — NOT shipped to the browser
   db.mjs                     Authenticated Supabase client from .env SUPABASE_SERVICE_ROLE_KEY (bypasses RLS; read-only grant)
   query.mjs                  Quick CLI table query: node scripts/query.mjs <table> "col=op.value" "select=..." limit=N
+  neighborhood-choir-check.mjs  Verifies the Neighborhood Choir report by extracting its own pure-logic block and running it over live data
 supabase/
   migrations/
     001_initial_schema.sql   students, events, enrollments tables + indexes
@@ -379,9 +382,11 @@ Summarizes age, gender, ethnicity, and household income for **unique students** 
 
 **Age brackets** (computed from `birthdate` against the enrollment's event `class_start_date`; earliest `class_start_date` within the unit): `0–2`, `3–35`, `36–54`, `55–74`, `75+`, and `No Response` (no birthdate, or birthdate before 1905).
 
-**Gender / Ethnicity:** raw stored value as the category label; blank/null → `No Response`. Each student has one ethnicity (coalesced from the three source columns in priority order). Two case-insensitive alias merges collapse related labels into one category (both in `Demographics.jsx`): **ethnicity** — `"Hispanic"` and `"Latinx"` → `"Hispanic/Latinx"` (`ETHNICITY_ALIASES`); **gender** — `"Trans Male"`, `"Trans Female"`, and `"Transgender"` → `"Transgender"`; `"Nonbinary/Gender Nonconforming/Genderqueer"`, `"Gender Non-Conforming"`, `"Agender"`, and `"Another gender not listed here"` → `"Gender Non-Conforming"` (`GENDER_ALIASES`).
+**Gender / Ethnicity:** raw stored value as the category label; blank/null → `No Response`. Each student has one ethnicity (coalesced from the three source columns in priority order). Case-insensitive alias merges collapse related labels into one category: **ethnicity** — `"Hispanic"` and `"Latinx"` → `"Hispanic/Latinx"` (`ETHNICITY_ALIASES`); **gender** — `"Trans Male"`, `"Trans Female"`, `"Transgender"` → `"Transgender"`; `"Nonbinary/Gender Nonconforming/Genderqueer"` and `"Gender Non-Conforming"` → `"Nonbinary/Gender Nonconforming/Genderqueer"`; plus case normalization for `"Decline to State"` and `"Two Spirit"` (`GENDER_ALIASES`).
 
-**Household income:** mapped via an explicit case-insensitive lookup table (`INCOME_MAP` in `Demographics.jsx`), not numeric parsing. `High`: Above $145,201 / Above $154,700 / $116,040–$154,700. `Low`: Below $60,600 / Below $58,000 / Below $60,000 / $96,700–$116,040 / $97,000–$145,200 / $58,000–$96,700 / $60,600–$97,000 / $60,001–$69,000 / $69,001–$78,000 / $78,001–$86,000 / $86,001–$93,000 / Above $93,001. `Decline to State`: Decline to state. `No Response`: blank, `0`, **and any value not in the map** (so a new ASAP income label lands in No Response rather than vanishing — map must be updated when ASAP adds brackets; ASAP's bracket labels have changed several times across years).
+**Household income:** mapped via an explicit case-insensitive lookup table (`INCOME_MAP`), not numeric parsing. `High`: Above $154,700. `Low`: Below $60,600 / Below $58,000 / Below $60,000 / $96,700–$116,040 / $97,000–$145,200 / $58,000–$96,700 / $60,600–$97,000 / $60,001–$69,000 / $69,001–$78,000 / $78,001–$86,000 / $86,001–$93,000 / Above $93,001 / $116,040–$154,700 / Above $145,201. (The three top brackets other than Above $154,700 landing in `Low` reflects SF's very high area median income — HUD's low-income limit for a larger San Francisco household runs above $145k. An earlier version of this document listed Above $145,201 and $116,040–$154,700 as `High`, which never matched the shipped map.) `Decline to State`: Decline to state. `No Response`: blank, `0`, **and any value not in the map** (so a new ASAP income label lands in No Response rather than vanishing — map must be updated when ASAP adds brackets; ASAP's bracket labels have changed several times across years).
+
+**Where these categories live:** the income map, income order, and both alias maps are in **`src/reports/demographicCategories.js`**, shared by Demographics, LIYP, and Neighborhood Choir Program Demographics. A grant report that disagreed with Demographics about what counts as "Low" income, or about how Hispanic/Latinx is grouped, would be a bug — so ASAP's periodic relabelling is absorbed in exactly one file. (These definitions previously lived in `Demographics.jsx` and were copied into LIYP.)
 
 **UI:** Scope tabs (`Total · Lessons · Group Classes`, each showing its unique-student count) select which aggregate breakdown displays (count + % per bucket across the four dimensions). In the Group Classes view, a sortable class table with the Classes-page drilldown pattern appears below — click a class to expand its four-dimension breakdown. Percentages are relative to the meaningful-response count for that dimension (No Response shows a `—` for its percentage); age and income buckets stay in fixed logical order, gender/ethnicity by descending count with `No Response` last.
 
@@ -407,6 +412,28 @@ Groups (a student can appear in more than one):
 - **Children's Chorus** / **Teen Jazz Orchestra** — enrolled in the class of that exact name.
 
 **Tuition assistance:** originally shown per group (dollars from `total_discount` for Sliding-Scale + YMP; fully-subsidized headcount for the free programs), but **removed at the user's request** — the tuition-free programs record `$0` discounts inconsistently in ASAP (a billing-practice artifact, not a real change in aid), so the dollar/subsidized figures confused more than helped. The report now shows only unique students + ethnicity.
+
+---
+
+#### Neighborhood Choir Program Demographics
+
+Ethnicity, gender, and household income of **unique students** in the Neighborhood Choir Program — ASAP course name *Neighborhood Choirs for Older Adults and Adults with Disabilities* — for **one or more selected fiscal years** (FY pills, multi-select; same layout and Δ conventions as LIYP). Requested as ethnicities, gender, and low-income percentages.
+
+**Which enrollments count:** course name matching `/neighborhood\s*choirs?/i`. Matching on the distinguishing words rather than the exact title is deliberate — ASAP relabels courses constantly — and nothing else in the catalog pairs "neighborhood" with "choir" (the only other choir course on file is `R&B Choir and More`). Every matched course name is listed in a collapsible **Matched courses** strip above the tables, so a rename that widens or narrows the match surfaces instead of silently shifting the numbers. All 214 choir events on file are `activity_type = 'CLASS'` at Mission Branch, FY23–FY26.
+
+**Categories** come from `demographicCategories.js`, so they are identical to the Demographics report by construction. Percentages are out of the students who gave a meaningful response for **that** dimension (per-dimension base; `No Response` counted and shown but excluded from the base, so responding categories sum to 100%). `Decline to State` stays **in** the base — it is an answer, not a missing value — matching Demographics.
+
+**Low-income figure:** the `Low` income row; its percentage is the share of *responding* choir students in a low bracket. Also surfaced as three headline stat cards for the **most recent selected year** (labelled with the FY so a multi-year selection can't be misread as a total): unique students, low-income count (with the responding base), and low-income share.
+
+**Three tables** — Household income (fixed `INCOME_ORDER` rows), Ethnicity, Gender (both ordered by total students across the selected years, `No Response` last; rows are the union across years, so a category present in only one year still gets a row showing 0 elsewhere). Each has a bold `Unique students` row, a column per FY, and a Δ column between consecutive years: top line change in students, bottom line change in share — relative % on the `Unique students` row, **percentage points (pp)** on category rows.
+
+**Each year is aggregated independently** — a student enrolled in two selected years counts once in *each* column, so columns are not additive. A student enrolled in several quarters of the choir counts once per fiscal year.
+
+**Data loading:** two-phase. Mount → paginated `fiscal_year` + `events(course_name)` fetch, filtered client-side to choir rows so the pills only offer years the program ran. On FY selection → paginated (1000/batch) `enrollments` filtered by `fiscal_year`, joined to `events(course_name)` and `students(gender, ethnicity, household_income)`; course filtering and dedup client-side (the course name lives on `events`, so filtering it server-side would mean a second round trip for event IDs).
+
+**Export:** one tall CSV — a row per (dimension, category), a students and % column per selected year, then Δ students and Δ "% / pp" columns between consecutive years.
+
+**Verification:** `node scripts/neighborhood-choir-check.mjs` extracts the report file's own pure-logic block (between the `pure logic` markers) and runs it over live data — no reimplementation. It checks unique students against an independent count joined through `event_id` (FY23 333 / FY24 333 / FY25 339 / FY26 405 — matched on all four years), reconciles categories + No Response = all students for every dimension and year, and confirms percentages sum to 100.0000% of responders. FY26: 405 students, low income 206 of 367 responding = 56.1%.
 
 ---
 
