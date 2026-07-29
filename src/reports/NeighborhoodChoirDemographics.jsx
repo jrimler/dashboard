@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase'
 import { fySortKey } from '../utils/periodUtils'
 import {
   NO_RESPONSE, INCOME_ORDER, LOW_INCOME,
+  INCOME_PCT_EXCLUDED, RESPONSE_PCT_EXCLUDED, pctBase, bucketPct,
   incomeCategoryFor, ethnicityLabelFor, genderLabelFor,
 } from './demographicCategories'
 
@@ -21,13 +22,16 @@ function isNeighborhoodChoir(courseName) {
 }
 
 // The three dimensions this report breaks down, in display order. Category
-// labels come from demographicCategories.js, shared with the Demographics
-// report. `order` fixes the row order for income (a logical scale); ethnicity
-// and gender order by count, which varies year to year.
+// labels and percentage bases come from demographicCategories.js, shared with
+// the Demographics report. `order` fixes the row order for income (a logical
+// scale); ethnicity and gender order by count, which varies year to year.
+// `excluded` is what the percentage base leaves out — income also drops
+// "Decline to State", so income percentages cover only students who named a
+// bracket.
 const DIMENSIONS = [
-  { id: 'income',    title: 'Household income', order: INCOME_ORDER, valueOf: s => incomeCategoryFor(s.income) },
-  { id: 'ethnicity', title: 'Ethnicity',        order: null,         valueOf: s => ethnicityLabelFor(s.ethnicity) },
-  { id: 'gender',    title: 'Gender',           order: null,         valueOf: s => genderLabelFor(s.gender) },
+  { id: 'income',    title: 'Household income', order: INCOME_ORDER, excluded: INCOME_PCT_EXCLUDED,   valueOf: s => incomeCategoryFor(s.income) },
+  { id: 'ethnicity', title: 'Ethnicity',        order: null,         excluded: RESPONSE_PCT_EXCLUDED, valueOf: s => ethnicityLabelFor(s.ethnicity) },
+  { id: 'gender',    title: 'Gender',           order: null,         excluded: RESPONSE_PCT_EXCLUDED, valueOf: s => genderLabelFor(s.gender) },
 ]
 
 // Unique students in one fiscal year, keyed by customer_id. A student in three
@@ -58,8 +62,9 @@ function collectStudents(enrollments) {
 }
 
 // Counts per category for one dimension. Percentages are out of the students
-// who gave a meaningful response (No Response counted and shown, but excluded
-// from the base), exactly as in the Demographics report.
+// whose answer counts toward that dimension's base — No Response always
+// excluded, plus Decline to State for income — exactly as in the Demographics
+// report. Excluded labels keep their count and show no percentage.
 function dimensionBreakdown(students, dim) {
   const counts = {}
   for (const s of students.values()) {
@@ -67,8 +72,7 @@ function dimensionBreakdown(students, dim) {
     counts[label] = (counts[label] ?? 0) + 1
   }
   const total = students.size
-  const base  = total - (counts[NO_RESPONSE] ?? 0)
-  return { total, base, counts }
+  return { total, base: pctBase(counts, total, dim.excluded), counts, excluded: dim.excluded }
 }
 
 function buildReport(enrollments) {
@@ -87,10 +91,7 @@ function buildReport(enrollments) {
   }
 }
 
-function pctFor(label, count, base) {
-  if (label === NO_RESPONSE || base === 0) return null
-  return (count / base) * 100
-}
+// ─────────────────────────────────────────────────────────────────────────────
 
 // One table per dimension: a bold unique-students row, then a row per category
 // with a column per fiscal year. Category rows are the union across the selected
@@ -132,7 +133,7 @@ function buildComparison(cols) {
         kind: 'category',
         cells: perYear.map(d => {
           const count = d.counts[label] ?? 0
-          return { count, pct: pctFor(label, count, d.base) }
+          return { count, pct: bucketPct(label, count, d.base, d.excluded) }
         }),
       })),
     ]
@@ -432,27 +433,33 @@ export default function NeighborhoodChoirDemographics() {
               State through an explicit lookup table. ASAP has changed those labels several times, so
               a bracket not yet in the table lands in No Response rather than disappearing — a jump in
               No Response is the signal to update the table. The <strong>Low</strong> row is the
-              low-income figure: its percentage is the share of responding choir students who reported
-              a household income in a low bracket.
+              low-income figure.
             </p>
+            <div className="ugcb-info-section-title">The percentage base (income differs)</div>
             <p>
-              Percentages are out of the students who gave a meaningful response for{' '}
-              <em>that</em> dimension: "No Response" is counted and shown but excluded from the
-              percentage base, so the remaining categories sum to 100%. The base is worked out
-              separately per dimension, because response rates differ across ethnicity, gender, and
-              income. <strong>Decline to State stays in the base</strong> — it is an answer, not a
-              missing value — which is what keeps this consistent with the Demographics report.
+              Percentages are out of the students whose answer counts for{' '}
+              <em>that</em> dimension, worked out separately per dimension because response rates
+              differ. Excluded categories keep their count and show "—" instead of a percentage, and
+              the categories that do get a percentage sum to 100%.
             </p>
+            <ul>
+              <li><strong>Household income</strong> excludes both <strong>No Response</strong> and{' '}
+                <strong>Decline to State</strong>. Income percentages therefore describe only the
+                students who <em>named a bracket</em> — so the low-income share can't be dragged down
+                by a growing number of students declining to answer.</li>
+              <li><strong>Ethnicity</strong> and <strong>gender</strong> exclude only{' '}
+                <strong>No Response</strong>. "Decline to State" keeps its percentage there, because
+                it is a meaningful self-description rather than a gap in the income data a funder
+                asked about.</li>
+            </ul>
             <p>
-              <strong>Reading the low-income share — important.</strong> Because Decline to State is
-              in the base, students who decline push the Low percentage <em>down</em>. In this program
-              that effect dominates: the Low share fell from 70.7% (FY23) to 56.1% (FY26), but
-              essentially every choir student who actually named an income bracket named a low one —
-              99–100% in all four years on file (FY26: 206 Low against 2 High). The Decline to State
-              row grew over the same span from 83 students to 159. So the falling Low percentage
-              reflects <em>more students declining to answer</em>, not choir families getting
-              wealthier. When reporting a low-income figure for this program, read the Low, Decline to
-              State, and No Response rows together — and say which base the percentage uses.
+              <strong>Why this matters here.</strong> Declining to state income is common and rising
+              in this program — 83 students in FY23, 159 in FY26 — and on the old base (which counted
+              decliners in the denominator) that alone made the low-income share appear to fall from
+              70.7% to 56.1%. On the current base the picture is the true one: essentially every choir
+              student who names an income bracket names a low one, 99–100% in all four years on file.
+              Read the Low percentage as "of those who told us", and check the Decline to State and No
+              Response counts alongside it to see how much of the program that percentage speaks for.
             </p>
             <div className="ugcb-info-section-title">Comparing years</div>
             <p>
@@ -536,7 +543,7 @@ export default function NeighborhoodChoirDemographics() {
                       {latest.report.lowIncome.count.toLocaleString()}
                     </div>
                     <div className="pig-stat-label">
-                      Low income — {latest.fy} (of {latest.report.lowIncome.base.toLocaleString()} responding)
+                      Low income — {latest.fy} (of {latest.report.lowIncome.base.toLocaleString()} who named a bracket)
                     </div>
                   </div>
                   <div className="pig-stat-card pig-stat-card--accent">

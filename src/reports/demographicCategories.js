@@ -38,6 +38,36 @@ export const INCOME_ORDER = ['High', 'Low', 'Decline to State', 'No Response']
 // "what share of these students are low-income?" doesn't hardcode the string.
 export const LOW_INCOME = 'Low'
 
+export const DECLINE_TO_STATE = 'Decline to State'
+
+// Labels excluded from the percentage base for INCOME ONLY: "No Response" (no
+// answer at all) and "Decline to State" (an explicit refusal). Income
+// percentages therefore describe only the students who named a bracket, so
+// e.g. the low-income share can't be dragged down by a growing number of
+// students declining to answer.
+//
+// This is deliberately income-only. Ethnicity and gender keep "Decline to
+// State" in their base and give it a percentage, because there it is a
+// meaningful self-description rather than a gap in the income data a funder
+// asked about. Both dimensions still exclude "No Response".
+export const INCOME_PCT_EXCLUDED = [NO_RESPONSE, DECLINE_TO_STATE]
+export const RESPONSE_PCT_EXCLUDED = [NO_RESPONSE]
+
+// Percentage base for a dimension: the students whose answer counts toward the
+// denominator. `excluded` is one of the two lists above.
+export function pctBase(counts, total, excluded) {
+  let base = total
+  for (const label of excluded) base -= counts[label] ?? 0
+  return base
+}
+
+// A bucket's percentage, or null when the label is excluded from the base
+// (shown as a count with no percentage).
+export function bucketPct(label, count, base, excluded) {
+  if (excluded.includes(label) || base === 0) return null
+  return (count / base) * 100
+}
+
 // Ethnicity labels that name the same group and should report as one category.
 // Matched case-insensitively against the stored value (each student has one
 // ethnicity, coalesced from the three source columns in priority order).

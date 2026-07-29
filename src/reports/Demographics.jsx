@@ -4,7 +4,8 @@ import {
   fySortKey, quarterSortKey, parseQuarter, quarterFYLabel, periodLabel,
 } from '../utils/periodUtils'
 import {
-  NO_RESPONSE, INCOME_ORDER,
+  NO_RESPONSE, INCOME_ORDER, INCOME_PCT_EXCLUDED, RESPONSE_PCT_EXCLUDED,
+  pctBase, bucketPct,
   incomeCategoryFor, ethnicityLabelFor, genderLabelFor,
 } from './demographicCategories'
 
@@ -134,9 +135,10 @@ function buildUnits(enrollments) {
 }
 
 // Turns a deduped student Map into the four dimension breakdowns.
-// Counts include "No Response", but percentages are relative to the count of
-// students with a meaningful response for that dimension (No Response excluded
-// from the base and shown with no percentage).
+// Counts include every label, but percentages are relative to the students whose
+// answer counts toward that dimension's base. Age, gender, and ethnicity exclude
+// only "No Response"; income also excludes "Decline to State" (see
+// INCOME_PCT_EXCLUDED). Excluded labels show a count with no percentage.
 function buildBreakdown(studentsMap) {
   const total = studentsMap.size
   const age = {}, gender = {}, ethnicity = {}, income = {}
@@ -148,8 +150,8 @@ function buildBreakdown(studentsMap) {
   }
   return {
     total,
-    age:       fixedBuckets(AGE_BRACKETS, age, total),
-    income:    fixedBuckets(INCOME_ORDER, income, total),
+    age:       fixedBuckets(AGE_BRACKETS, age, total, RESPONSE_PCT_EXCLUDED),
+    income:    fixedBuckets(INCOME_ORDER, income, total, INCOME_PCT_EXCLUDED),
     gender:    countOrderedBuckets(gender, total),
     ethnicity: countOrderedBuckets(ethnicity, total),
   }
@@ -157,36 +159,31 @@ function buildBreakdown(studentsMap) {
 
 function bump(counts, label) { counts[label] = (counts[label] ?? 0) + 1 }
 
-function pctOf(count, total) { return total === 0 ? 0 : (count / total) * 100 }
-
-// Percentage base: students with a meaningful response (total minus No Response).
-function respondedBase(counts, total) { return total - (counts[NO_RESPONSE] ?? 0) }
-
-// Percentages are out of the responded base; No Response shows count but no pct.
-function bucketPct(label, count, base) {
-  return label === NO_RESPONSE ? null : pctOf(count, base)
-}
-
 // Fixed logical bucket order (age, income); zero-count buckets stay visible.
-function fixedBuckets(order, counts, total) {
-  const base = respondedBase(counts, total)
+function fixedBuckets(order, counts, total, excluded) {
+  const base = pctBase(counts, total, excluded)
   return order.map(label => ({
     label,
     count: counts[label] ?? 0,
-    pct:   bucketPct(label, counts[label] ?? 0, base),
+    pct:   bucketPct(label, counts[label] ?? 0, base, excluded),
   }))
 }
 
-// Descending count with No Response last (gender, ethnicity); only present values.
+// Descending count with No Response last (gender, ethnicity); only present
+// values. "Decline to State" is a real category here and keeps its percentage.
 function countOrderedBuckets(counts, total) {
-  const base = respondedBase(counts, total)
+  const base = pctBase(counts, total, RESPONSE_PCT_EXCLUDED)
   return Object.entries(counts)
     .sort(([la, ca], [lb, cb]) => {
       if (la === NO_RESPONSE) return 1
       if (lb === NO_RESPONSE) return -1
       return cb - ca || la.localeCompare(lb)
     })
-    .map(([label, count]) => ({ label, count, pct: bucketPct(label, count, base) }))
+    .map(([label, count]) => ({
+      label,
+      count,
+      pct: bucketPct(label, count, base, RESPONSE_PCT_EXCLUDED),
+    }))
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -553,11 +550,21 @@ export default function Demographics() {
           together and a student in two sections counts once. Per-class counts do not add up to the
           Group Class total, since a student can appear in several classes.
           Every figure is shown as a raw unique-student count;
-          percentages are out of only the students who gave a meaningful response for that dimension
-          (the "No Response" count is shown but excluded from the percentage base, so the remaining
-          categories sum to 100%). The base is worked out separately for each dimension, because
-          response rates differ across age, gender, ethnicity, and income.
+          percentages are out of only the students whose answer counts toward that dimension's base,
+          worked out separately for each dimension because response rates differ across age, gender,
+          ethnicity, and income. A category left out of the base keeps its count and shows "—" instead
+          of a percentage, and the categories that do get a percentage sum to 100%.
           No student names or other identifying details are shown.
+        </p>
+        <p>
+          <strong>What each base leaves out.</strong> Age, gender, and ethnicity exclude only{' '}
+          <strong>No Response</strong>. <strong>Household income also excludes Decline to State</strong>,
+          so income percentages describe only the students who <em>named a bracket</em> — a rising
+          number of students declining to answer can't drag the low-income share down. Decline to State
+          keeps its percentage under gender and ethnicity, where it is a meaningful self-description
+          rather than a gap in the income data a funder asked about. Because the income base is
+          narrower, always read the income percentages next to the Decline to State and No Response
+          counts to see how much of the group they speak for.
         </p>
         <p>
           <strong>Age</strong> is calculated at the earliest class start date within the unit being

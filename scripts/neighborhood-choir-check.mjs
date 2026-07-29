@@ -25,8 +25,16 @@ if (start < 0 || end < 0) {
 }
 const block = src.slice(start, end)
 
+// Reuse the report's own import of the shared categories, verbatim apart from
+// the module specifier — so adding a name there can't leave this check behind.
+const sharedImport = src.match(/import\s*\{[^}]*\}\s*from\s*'\.\/demographicCategories'/)
+if (!sharedImport) {
+  console.error("Could not find the './demographicCategories' import in NeighborhoodChoirDemographics.jsx")
+  process.exit(1)
+}
+
 const moduleSrc = [
-  `import { NO_RESPONSE, INCOME_ORDER, LOW_INCOME, incomeCategoryFor, ethnicityLabelFor, genderLabelFor } from '${sharedPath}'`,
+  sharedImport[0].replace("'./demographicCategories'", `'${sharedPath}'`),
   block,
   'export { isNeighborhoodChoir, collectStudents, buildReport, buildComparison, cellDelta, DIMENSIONS }',
 ].join('\n')
@@ -89,22 +97,28 @@ for (const c of cols) {
   console.log(`  ${c.fy}  report ${String(c.report.uniqueStudents).padStart(4)}   event_id join ${String(indep).padStart(4)}   ${match ? 'match' : 'MISMATCH'}`)
 }
 
-// ─── 2. reconciliation: every student lands in exactly one category ─────────
-console.log('\n=== 2. Reconciliation — categories + No Response = all students ===')
+// ─── 2. reconciliation: every student lands in exactly one category, and the
+// percentage base plus the categories it excludes accounts for all of them.
+// Income excludes Decline to State as well as No Response; ethnicity and gender
+// exclude only No Response — so the expected base is per-dimension.
+console.log('\n=== 2. Reconciliation — base + excluded categories = all students ===')
 let ok2 = true
 for (const c of cols) {
   for (const d of DIMENSIONS) {
-    const dim    = c.report.dims[d.id]
-    const summed = Object.values(dim.counts).reduce((a, b) => a + b, 0)
-    const noResp = dim.counts['No Response'] ?? 0
-    const match  = summed === c.report.uniqueStudents && dim.base === summed - noResp
+    const dim      = c.report.dims[d.id]
+    const summed   = Object.values(dim.counts).reduce((a, b) => a + b, 0)
+    const excluded = d.excluded.reduce((a, label) => a + (dim.counts[label] ?? 0), 0)
+    const match    = summed === c.report.uniqueStudents && dim.base + excluded === summed
     if (!match) ok2 = false
-    console.log(`  ${c.fy} ${d.id.padEnd(10)} counted ${String(summed).padStart(4)} = students ${String(c.report.uniqueStudents).padStart(4)}   responded ${String(dim.base).padStart(4)} + no-response ${String(noResp).padStart(3)}   ${match ? 'ok' : 'MISMATCH'}`)
+    console.log(
+      `  ${c.fy} ${d.id.padEnd(10)} counted ${String(summed).padStart(4)} = students ${String(c.report.uniqueStudents).padStart(4)}   ` +
+      `base ${String(dim.base).padStart(4)} + excluded ${String(excluded).padStart(3)} (${d.excluded.join(' + ')})   ${match ? 'ok' : 'MISMATCH'}`
+    )
   }
 }
 
-// ─── 3. percentages of responding students sum to 100 ──────────────────────
-console.log('\n=== 3. Percentages sum to 100% of responders (per dimension) ===')
+// ─── 3. percentages sum to 100 of the dimension's own base ─────────────────
+console.log("\n=== 3. Percentages sum to 100% of each dimension's base ===")
 const units = buildComparison(cols)
 let ok3 = true
 for (const u of units) {
@@ -131,10 +145,10 @@ for (const u of units) {
   }
 }
 
-console.log('\n=== Low-income headline ===')
+console.log('\n=== Low-income headline (base excludes Decline to State) ===')
 for (const c of cols) {
   const li = c.report.lowIncome
-  console.log(`  ${c.fy}  ${li.count} of ${li.base} responding = ${li.pct === null ? '—' : li.pct.toFixed(1) + '%'}  (${c.report.uniqueStudents} students total)`)
+  console.log(`  ${c.fy}  ${li.count} of ${li.base} who named a bracket = ${li.pct === null ? '—' : li.pct.toFixed(1) + '%'}  (${c.report.uniqueStudents} students total)`)
 }
 
 const allOk = ok1 && ok2 && ok3
