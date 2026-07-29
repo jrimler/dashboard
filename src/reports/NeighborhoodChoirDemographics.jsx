@@ -443,6 +443,17 @@ export default function NeighborhoodChoirDemographics() {
               income. <strong>Decline to State stays in the base</strong> — it is an answer, not a
               missing value — which is what keeps this consistent with the Demographics report.
             </p>
+            <p>
+              <strong>Reading the low-income share — important.</strong> Because Decline to State is
+              in the base, students who decline push the Low percentage <em>down</em>. In this program
+              that effect dominates: the Low share fell from 70.7% (FY23) to 56.1% (FY26), but
+              essentially every choir student who actually named an income bracket named a low one —
+              99–100% in all four years on file (FY26: 206 Low against 2 High). The Decline to State
+              row grew over the same span from 83 students to 159. So the falling Low percentage
+              reflects <em>more students declining to answer</em>, not choir families getting
+              wealthier. When reporting a low-income figure for this program, read the Low, Decline to
+              State, and No Response rows together — and say which base the percentage uses.
+            </p>
             <div className="ugcb-info-section-title">Comparing years</div>
             <p>
               Select more than one fiscal year to get a column per year (oldest to newest) with a{' '}
