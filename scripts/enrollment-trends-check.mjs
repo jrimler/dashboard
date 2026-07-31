@@ -42,25 +42,36 @@ const scratch = join(mkdtempSync(join(tmpdir(), 'entrends-')), 'extracted.mjs')
 writeFileSync(scratch, moduleSrc)
 const { buildQuarterSeries, applySummerFilter } = await import(scratch)
 
-// ─── fetch, exactly as the report does (paginated 1000/batch) ───────────────
-async function fetchAll() {
+// ─── fetch, exactly as the report does ──────────────────────────────────────
+// Mirrors src/utils/fetchAll.js: both tables flat and paginated in parallel,
+// ordered by a unique column so the pages can't overlap, joined client-side.
+async function fetchTable(table, select, orderBy) {
   const PAGE = 1000
-  let from = 0, all = []
-  while (true) {
-    const { data, error } = await sb
-      .from('enrollments')
-      .select('customer_id, time_period, is_tuition_free, events(location, activity_type)')
-      .order('event_enrollment_id')
-      .range(from, from + PAGE - 1)
-    if (error) { console.error(error.message); process.exit(1) }
-    all = all.concat(data)
-    if (data.length < PAGE) break
-    from += PAGE
-  }
-  return all
+  const { count, error: countError } =
+    await sb.from(table).select('*', { count: 'exact', head: true })
+  if (countError) { console.error(countError.message); process.exit(1) }
+  const pages = Math.ceil(count / PAGE)
+  const parts = await Promise.all(Array.from({ length: pages }, (_, i) =>
+    sb.from(table).select(select).order(orderBy)
+      .range(i * PAGE, i * PAGE + PAGE - 1)
+      .then(r => { if (r.error) { console.error(r.error.message); process.exit(1) } return r.data })
+  ))
+  return { rows: parts.flat(), count }
 }
 
-const rows   = await fetchAll()
+const enr = await fetchTable('enrollments', 'event_enrollment_id, customer_id, time_period, is_tuition_free, event_id', 'event_enrollment_id')
+const evs = await fetchTable('events', 'event_id, location, activity_type', 'event_id')
+
+// Parallel pagination is only safe if it returns every row exactly once.
+const uniqueIds = new Set(enr.rows.map(r => r.event_enrollment_id))
+if (enr.rows.length !== enr.count || uniqueIds.size !== enr.count) {
+  console.error(`\n❌ paginated fetch is unstable: ${enr.rows.length} rows / ${uniqueIds.size} unique vs ${enr.count} expected`)
+  process.exit(1)
+}
+
+const eventById = new Map(evs.rows.map(e => [e.event_id, e]))
+for (const r of enr.rows) r.events = eventById.get(r.event_id)
+const rows = enr.rows
 const series = buildQuarterSeries(rows)
 
 let failures = 0

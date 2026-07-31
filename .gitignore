@@ -6,3 +6,6 @@ dist/
 # ASAP exports dropped in for local analysis — contain student PII, never commit
 *.xls
 *.xlsx
+
+# Playwright screenshots from scripts/screenshot.mjs — local visual checks, not artifacts
+screenshots/

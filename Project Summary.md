@@ -173,6 +173,7 @@ src/
   utils/
     uploadReports.js         Full upload + upsert pipeline (parse → join → upsert)
     periodUtils.js           Period sorting, parsing, label formatting, sort keys
+    fetchAll.js              Paginated Supabase reads — pages issued in parallel, stable ORDER BY required (see Performance below)
   pages/
     Login.jsx                Email/password login screen (shown when no session)
     Upload.jsx               Working — 4 labeled report sections (URL + instructions + file input), progress log, Test Connection
@@ -200,6 +201,7 @@ scripts/                     Local analysis tooling (Node, service_role key) —
   neighborhood-choir-check.mjs  Verifies the Neighborhood Choir report by extracting its own pure-logic block and running it over live data
   income-base-check.mjs      Verifies the income percentage base (Decline to State excluded for income only) across both income-reporting reports
   enrollment-trends-check.mjs  Verifies Enrollment Trends the same way — extracts its pure-logic block and reconciles every quarter bucket against live data
+  screenshot.mjs             Headless-browser visual check: starts the dev server, logs in, asserts the page rendered, writes screenshots/ (see Seeing the app below)
 supabase/
   migrations/
     001_initial_schema.sql   students, events, enrollments tables + indexes
@@ -433,7 +435,7 @@ The first **charted** report in the dashboard. Every quarter on file at once —
 
 **Colour.** Series use the two leading slots of the validated categorical palette (blue `#2a78d6`, orange `#eb6834`), *not* the CMC green. Green is a brand colour that has never been checked for colour-vision separation; these two clear the adjacent-pair gate with a wide margin (CVD ΔE 24.7). Green stays UI chrome — pills, focus rings. Chart furniture (`.et-*` classes in `index.css`) follows the app's own tokens.
 
-**Data loading:** single-phase. One paginated fetch (1000/batch) of every enrollment joined to `events(location, activity_type)`; all bucketing client-side. Unlike the Enrollment page there is no period selector — the report is *about* every period, so it loads them all (~32 requests, 31,561 rows).
+**Data loading:** single-phase, via `fetchAll` — enrollments and events fetched flat and in parallel, then joined client-side. Unlike the Enrollment page there is no period selector: the report is *about* every period, so it loads them all (31,561 enrollment rows + 19,172 event rows). Asking PostgREST for a nested `events(...)` join page by page took **3,643 ms**; the flat parallel version takes **499 ms** for the same rows with 0 orphans.
 
 **Verification:** `node scripts/enrollment-trends-check.mjs` extracts the report's own pure-logic block (between the `pure logic` markers) and runs it over live data — no reimplementation. It reconciles bucketed + unparseable = fetched (31,561 + 0), asserts all three splits partition every quarter with nothing unclassified, matches per-quarter unique students against an independent count, confirms strict sort-key ordering, and checks the summer filter keeps 12 + drops 5 = 17. It also prints season-over-season growth: Fall +18.8%, Winter +20.5%, Spring +16.8% FY23 → FY26, and the Winter breakdown that shows lessons +10 vs. group classes +404 against a +414 total.
 
@@ -509,6 +511,43 @@ Built to investigate a sliding-scale count discrepancy (a report of 200 vs a sta
 
 ---
 
+## Performance — paginated reads (`src/utils/fetchAll.js`)
+
+Pages were originally fetched **one after another** in a `while` loop. That is correct but slow, and it is the main reason the dashboard felt sluggish: a report needing 32 pages paid 32 sequential round trips before it could render anything.
+
+`fetchAll(supabase, table, { select, orderBy, apply })` issues the pages **concurrently** (capped at 8 in flight) after one `head: true` count query. Two rules it enforces:
+
+- **Always paginate.** An unpaginated query silently caps at 1000 rows and returns no error.
+- **`orderBy` is required and must be unique.** PostgREST's `.range()` is an `OFFSET`; without a stable sort, Postgres may order rows differently per request and concurrent pages can overlap or skip. Ordering by the primary key costs nothing measurable once the pages run in parallel — verified by re-fetching and confirming 31,561 rows / 31,561 unique ids.
+
+Measured against the live database (enrollments, 31,561 rows, 32 pages):
+
+| Strategy | Time |
+|---|---|
+| Sequential pages with a nested `events(...)` join — the original | 3,643 ms |
+| Parallel pages, still with the nested join | 1,836 ms |
+| **Parallel pages, both tables flat, joined client-side** | **499 ms** |
+
+The nested join was the expensive part, not the ordering. `joinBy(rows, related, { on, as })` does the client-side join that replaces it.
+
+Only **Enrollment Trends** uses this so far. The other reports still use the sequential loop and would each get a similar speedup by adopting it — a mechanical change, one report at a time.
+
+---
+
+## Seeing the app (`scripts/screenshot.mjs`)
+
+A chart can be logically correct and still render nothing. The first version of Enrollment Trends measured its container with an effect keyed on a `useRef` object; the effect ran once while the element was still the "Loading…" placeholder, measured `null`, and never re-ran — so both charts sat at width 0 and drew nothing, while every unit-level check passed.
+
+`node scripts/screenshot.mjs [route]` guards that class of bug: it starts the dev server, logs in through the real form, waits out the loading state, then **asserts** the page is healthy before writing `screenshots/<route>.png` (gitignored):
+
+- no console errors, no failed requests, no `.error-banner`
+- every `<svg>` has real layout size (not 0×0)
+- every `<svg>` actually contains marks (paths / lines / labels)
+
+For the trends report it also captures the Branch, Lessons-vs-classes, and summers-excluded states. Credentials come from the gitignored `.env` (`E2E_EMAIL`, `E2E_PASSWORD`) and never from the command line.
+
+---
+
 ## Known Issues / Design Decisions
 
 | Issue | Status | Notes |
@@ -530,6 +569,8 @@ Built to investigate a sliding-scale count discrepancy (a report of 200 vs a sta
 | Placeholder birthdates (`1900-01-01`, age ~126) misclassifying youth classes | Fixed (July 2026) | Ages outside 0–100 treated as unknown (`MAX_PLAUSIBLE_AGE`); Teen Jazz Orchestra was showing Adult in the Board report. Same guard applied in LIYP and Discount Codes |
 | Tuition-free programs record `$0` discount inconsistently in ASAP | Accepted / design | YMP, Children's Chorus, Teen Jazz often store `amount=0, total_discount=0` (varies by year — a billing-practice artifact). Summing discounts undercounts them; LIYP therefore dropped tuition-assistance figures entirely |
 | `Decline to State` deflating income percentages | Changed by request (July 2026) | Income percentages now exclude `Decline to State` **and** `No Response` from the base, so they describe only students who named a bracket. Ethnicity/gender still exclude only `No Response`. Applied in one place (`INCOME_PCT_EXCLUDED`) so every demographic report moved together. Big shift: all-students FY26 low-income share 62.4% → 92.1%; Neighborhood Choir FY26 56.1% → 99.0%. Verified by `scripts/income-base-check.mjs` |
+| Charts rendered blank (Enrollment Trends) | Fixed (July 2026) | The width hook used `useLayoutEffect(…, [ref])` on a `useRef` object, so it ran once while the measured element was still the "Loading…" placeholder and never re-ran — width stayed 0 and both charts returned `null`. Now a **callback ref**, which re-runs the effect when the node actually attaches. Caught only by looking at the page; `scripts/screenshot.mjs` now asserts svg size and mark count |
+| Sequential pagination made every page slow | Fixed for Enrollment Trends (July 2026) | `src/utils/fetchAll.js` issues pages in parallel and joins related tables client-side: 3,643 ms → 499 ms. Other reports still use the sequential loop and can adopt it one at a time |
 | Summer quarters read as a collapse in any time series | By design | Summer genuinely runs ~48% smaller (1,120 vs 2,163 average). Enrollment Trends offers an **Exclude summer quarters** toggle and a season-vs-season chart rather than smoothing the data |
 | Newest fiscal year is normally partial | By design | Enrollment Trends labels partial years `(partial)` on the axis; growth should be read season-to-same-season, never off the last bar. FY27 currently holds only Summer 2026 |
 | Tables readable only by `authenticated` role (anon/service_role denied) | Fixed (July 2026) | One-time `GRANT SELECT ... TO service_role` in Supabase SQL editor enables local `scripts/` querying; service_role key kept in gitignored `.env` |

@@ -1,5 +1,6 @@
-import { useState, useEffect, useMemo, useRef, useLayoutEffect } from 'react'
+import { useState, useEffect, useMemo, useLayoutEffect } from 'react'
 import { supabase } from '../lib/supabase'
+import { fetchAll, joinBy } from '../utils/fetchAll'
 import { parseQuarter, quarterSortKey, quarterFYLabel, SEASON_SHORT } from '../utils/periodUtils'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -120,17 +121,24 @@ export function applySummerFilter(series, excludeSummer) {
 // Chart plumbing
 // ─────────────────────────────────────────────────────────────────────────────
 
-function useElementWidth(ref) {
+// Returns [callbackRef, width]. It has to be a *callback* ref, not a useRef:
+// the measured element only mounts after the data has loaded, so an effect keyed
+// on a (stable) ref object runs once while the element is still the "Loading…"
+// placeholder, measures null, and never re-runs — which left both charts at
+// width 0 and rendering nothing at all. A callback ref sets state when the node
+// actually attaches, so the effect re-runs against a real element.
+function useElementWidth() {
+  const [node, setNode] = useState(null)
   const [width, setWidth] = useState(0)
   useLayoutEffect(() => {
-    const node = ref.current
     if (!node) return
-    const ro = new ResizeObserver(() => setWidth(node.clientWidth))
+    const measure = () => setWidth(node.clientWidth)
+    const ro = new ResizeObserver(measure)
     ro.observe(node)
-    setWidth(node.clientWidth)
+    measure()
     return () => ro.disconnect()
-  }, [ref])
-  return width
+  }, [node])
+  return [setNode, width]
 }
 
 // Round the axis up to a clean maximum with no more than five gridlines.
@@ -461,29 +469,33 @@ export default function EnrollmentTrends() {
   const [excludeSummer, setExcludeSummer] = useState(false)
   const [infoOpen, setInfoOpen]           = useState(false)
 
-  const chartRef = useRef(null)
-  const width = useElementWidth(chartRef)
+  // Each chart measures its own container rather than sharing one width, so a
+  // future layout change to either card can't silently mis-size the other.
+  const [timelineRef, timelineWidth] = useElementWidth()
+  const [seasonRef, seasonWidth]     = useElementWidth()
 
   useEffect(() => { loadData() }, [])
 
   async function loadData() {
     setLoading(true)
     setError(null)
-    const PAGE = 1000
-    let from = 0, all = []
-    // Paginate — an unpaginated Supabase query silently caps at 1000 rows.
-    while (true) {
-      const { data, error } = await supabase
-        .from('enrollments')
-        .select('customer_id, time_period, is_tuition_free, events(location, activity_type)')
-        .order('event_enrollment_id')
-        .range(from, from + PAGE - 1)
-      if (error) { setError(error.message); setLoading(false); return }
-      all = all.concat(data)
-      if (data.length < PAGE) break
-      from += PAGE
+    try {
+      // Both tables flat and in parallel, joined here rather than by PostgREST —
+      // measured 3,643 ms → 499 ms against live data. See src/utils/fetchAll.js.
+      const [enrollments, events] = await Promise.all([
+        fetchAll(supabase, 'enrollments', {
+          select: 'customer_id, time_period, is_tuition_free, event_id',
+          orderBy: 'event_enrollment_id',
+        }),
+        fetchAll(supabase, 'events', {
+          select: 'event_id, location, activity_type',
+          orderBy: 'event_id',
+        }),
+      ])
+      setRows(joinBy(enrollments, events, { on: 'event_id', as: 'events' }))
+    } catch (e) {
+      setError(e.message)
     }
-    setRows(all)
     setLoading(false)
   }
 
@@ -598,8 +610,8 @@ export default function EnrollmentTrends() {
               <Legend series={cfg.series} />
             </div>
             <p className="et-card-sub">{cfg.caption}</p>
-            <div ref={chartRef}>
-              <TimelineChart data={shown} series={cfg.series} width={width} />
+            <div ref={timelineRef}>
+              <TimelineChart data={shown} series={cfg.series} width={timelineWidth} />
             </div>
           </div>
 
@@ -612,7 +624,9 @@ export default function EnrollmentTrends() {
               The same quarters regrouped so each season is compared only with itself — the
               honest way to read growth when summer runs about half the size of the other terms.
             </p>
-            <SeasonChart data={shown} series={cfg.series} width={width} />
+            <div ref={seasonRef}>
+              <SeasonChart data={shown} series={cfg.series} width={seasonWidth} />
+            </div>
           </div>
 
           <div className="pig-roster-header">

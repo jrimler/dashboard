@@ -1,0 +1,178 @@
+// Drives the real dashboard in a headless browser: starts the dev server, logs
+// in, navigates to a route, asserts the page actually rendered, and writes a
+// screenshot.
+//
+// This exists because a chart can be logically correct and still render nothing.
+// The first version of Enrollment Trends measured its container with an effect
+// keyed on a ref object, which ran once while the element was still the
+// "Loading…" placeholder — so both charts sat at width 0 and drew nothing, while
+// every unit-level check passed. The assertions below are aimed squarely at that
+// class of bug: an <svg> that exists but has no size, or has size but no marks.
+//
+// Usage:
+//   node scripts/screenshot.mjs                       # the Enrollment Trends report
+//   node scripts/screenshot.mjs /classes              # any route
+//   node scripts/screenshot.mjs /reports/demographics --width 1440
+//
+// Credentials come from .env (gitignored), never from the command line:
+//   E2E_EMAIL=you@sfcmc.org
+//   E2E_PASSWORD=…
+import { chromium } from 'playwright'
+import { spawn } from 'node:child_process'
+import { readFileSync, mkdirSync, existsSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { dirname, resolve, join } from 'node:path'
+
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+
+// ─── config ─────────────────────────────────────────────────────────────────
+const env = {}
+for (const line of readFileSync(join(root, '.env'), 'utf8').split('\n')) {
+  const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)$/)
+  if (m) env[m[1]] = m[2].trim().replace(/^["']|["']$/g, '')
+}
+if (!env.E2E_EMAIL || !env.E2E_PASSWORD) {
+  console.error(
+    'Missing E2E_EMAIL / E2E_PASSWORD in .env.\n' +
+    'Add them (the file is gitignored) so this script can log in:\n' +
+    '  E2E_EMAIL=you@sfcmc.org\n' +
+    '  E2E_PASSWORD=your-password'
+  )
+  process.exit(1)
+}
+
+const args   = process.argv.slice(2)
+const route  = args.find(a => a.startsWith('/')) ?? '/reports/enrollment-trends'
+const widthA = args.indexOf('--width')
+const WIDTH  = widthA >= 0 ? Number(args[widthA + 1]) : 1440
+const PORT   = 5199
+const BASE   = `http://localhost:${PORT}`
+const outDir = join(root, 'screenshots')
+mkdirSync(outDir, { recursive: true })
+
+// ─── dev server ─────────────────────────────────────────────────────────────
+console.log(`Starting dev server on :${PORT}…`)
+const server = spawn('npx', ['vite', '--port', String(PORT), '--strictPort'], {
+  cwd: root, stdio: 'ignore', detached: false,
+})
+const stop = () => { try { server.kill('SIGTERM') } catch {} }
+process.on('exit', stop)
+process.on('SIGINT', () => { stop(); process.exit(130) })
+
+async function waitForServer(timeoutMs = 30000) {
+  const started = Date.now()
+  while (Date.now() - started < timeoutMs) {
+    try {
+      const r = await fetch(BASE)
+      if (r.ok) return
+    } catch {}
+    await new Promise(r => setTimeout(r, 250))
+  }
+  throw new Error(`Dev server did not come up on ${BASE}`)
+}
+await waitForServer()
+
+// ─── drive the browser ──────────────────────────────────────────────────────
+const browser = await chromium.launch()
+const page = await browser.newPage({ viewport: { width: WIDTH, height: 1000 } })
+
+// Anything the page complains about is a finding, not noise.
+const consoleErrors = []
+const failedRequests = []
+page.on('console', m => { if (m.type() === 'error') consoleErrors.push(m.text()) })
+page.on('pageerror', e => consoleErrors.push(`[pageerror] ${e.message}`))
+page.on('requestfailed', r => failedRequests.push(`${r.method()} ${r.url()} — ${r.failure()?.errorText}`))
+
+let failures = 0
+const check = (ok, msg) => { if (!ok) failures++; console.log(`${ok ? '  ok  ' : ' FAIL '} ${msg}`) }
+
+console.log('Logging in…')
+await page.goto(BASE, { waitUntil: 'networkidle' })
+await page.fill('input[type="email"]', env.E2E_EMAIL)
+await page.fill('input[type="password"]', env.E2E_PASSWORD)
+await page.click('button[type="submit"]')
+
+// The login screen is replaced by the app shell once the session resolves.
+await page.waitForSelector('.sidebar', { timeout: 20000 })
+console.log('Logged in.')
+
+console.log(`Navigating to ${route}…`)
+const t0 = Date.now()
+await page.goto(`${BASE}${route}`, { waitUntil: 'networkidle' })
+
+// Reports fetch after mount; wait for the loading placeholder to clear.
+try {
+  await page.waitForFunction(
+    () => !document.body.innerText.includes('Loading'),
+    { timeout: 90000 }
+  )
+} catch {
+  console.log('  (still showing a loading state after 90s)')
+}
+const loadMs = Date.now() - t0
+console.log(`Rendered in ${(loadMs / 1000).toFixed(1)}s\n`)
+
+// ─── assertions ─────────────────────────────────────────────────────────────
+console.log('Page health')
+check(consoleErrors.length === 0, `no console errors${consoleErrors.length ? ':\n        ' + consoleErrors.slice(0, 5).join('\n        ') : ''}`)
+check(failedRequests.length === 0, `no failed requests${failedRequests.length ? ':\n        ' + failedRequests.slice(0, 5).join('\n        ') : ''}`)
+check(!(await page.locator('.error-banner').count()), 'no error banner on the page')
+
+// The blank-chart guard: an <svg> must exist, have real layout size, and
+// actually contain drawn marks.
+const svgCount = await page.locator('svg').count()
+if (svgCount > 0) {
+  console.log('\nCharts')
+  const svgStats = await page.$$eval('svg', nodes => nodes.map(n => {
+    const r = n.getBoundingClientRect()
+    return {
+      w: Math.round(r.width), h: Math.round(r.height),
+      paths: n.querySelectorAll('path').length,
+      texts: n.querySelectorAll('text').length,
+      lines: n.querySelectorAll('line').length,
+    }
+  }))
+  svgStats.forEach((s, i) => {
+    const sized = s.w > 100 && s.h > 50
+    const drawn = s.paths + s.lines > 0
+    check(sized, `svg #${i + 1} has real size (${s.w}×${s.h})`)
+    check(drawn, `svg #${i + 1} has marks (${s.paths} paths, ${s.lines} lines, ${s.texts} labels)`)
+  })
+}
+
+const tableRows = await page.locator('table tbody tr').count()
+if (tableRows) console.log(`\nTable: ${tableRows} rows`)
+
+// ─── capture ────────────────────────────────────────────────────────────────
+const slug = route.replace(/^\//, '').replace(/\//g, '-') || 'home'
+const file = join(outDir, `${slug}.png`)
+await page.screenshot({ path: file, fullPage: true })
+console.log(`\nScreenshot → ${file.replace(root + '/', '')}`)
+
+// Extra frames for the interactive states of the trends report.
+if (route.includes('enrollment-trends')) {
+  for (const label of ['Branch', 'Lessons vs. classes']) {
+    const pill = page.locator('.period-pill', { hasText: label }).first()
+    if (await pill.count()) {
+      await pill.click()
+      await page.waitForTimeout(400)
+      const f = join(outDir, `${slug}-${label.split(' ')[0].toLowerCase()}.png`)
+      await page.screenshot({ path: f, fullPage: true })
+      console.log(`Screenshot → ${f.replace(root + '/', '')}`)
+    }
+  }
+  const summer = page.locator('.period-pill', { hasText: 'Exclude summer' }).first()
+  if (await summer.count()) {
+    await summer.click()
+    await page.waitForTimeout(400)
+    const f = join(outDir, `${slug}-no-summer.png`)
+    await page.screenshot({ path: f, fullPage: true })
+    console.log(`Screenshot → ${f.replace(root + '/', '')}`)
+  }
+}
+
+await browser.close()
+stop()
+
+console.log(failures === 0 ? '\n✅ page rendered cleanly\n' : `\n❌ ${failures} check(s) failed\n`)
+process.exit(failures === 0 ? 0 : 1)
