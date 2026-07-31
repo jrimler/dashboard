@@ -1146,3 +1146,104 @@
   padding: 20px 24px;
   background: #f8faf8;
 }
+
+/* ── Enrollment Trends (charts) ──
+   Series colours live in EnrollmentTrends.jsx (they are data, not chrome); this
+   block styles only the chart furniture, which follows the app's own tokens. */
+.et-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 16px 18px 14px;
+  margin-bottom: 16px;
+}
+
+.et-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px 20px;
+}
+.et-card-title { font-size: 14px; font-weight: 600; color: var(--color-text); }
+.et-card-flag  { font-weight: 400; color: var(--color-muted); }
+.et-card-sub {
+  font-size: 12px;
+  color: var(--color-muted);
+  max-width: 70ch;
+  margin: 4px 0 12px;
+  line-height: 1.5;
+}
+
+.et-legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; color: #44403c; }
+.et-legend-item { display: flex; align-items: center; gap: 6px; }
+.et-legend-key {
+  width: 14px; height: 2px; border-radius: 1px; flex-shrink: 0;
+}
+.et-legend-key.block { width: 10px; height: 10px; border-radius: 2px; }
+
+.et-plot { position: relative; width: 100%; }
+.et-plot svg { display: block; width: 100%; overflow: visible; }
+
+/* Chart furniture: hairline, solid, one step off the surface — never dashed. */
+.et-grid  { stroke: #ebe9e6; stroke-width: 1; shape-rendering: crispEdges; }
+.et-axis  { stroke: var(--color-border); stroke-width: 1; shape-rendering: crispEdges; }
+.et-cross { stroke: var(--color-muted); stroke-width: 1; opacity: .35; shape-rendering: crispEdges; }
+
+/* Markers carry a 2px surface ring so they stay legible where lines overlap. */
+.et-dot { stroke: var(--color-surface); stroke-width: 2; }
+
+.et-tick {
+  font-size: 11px; fill: var(--color-muted);
+  font-variant-numeric: tabular-nums;
+}
+.et-xlabel { font-size: 11px; fill: #44403c; }
+.et-xlabel.partial { fill: var(--color-muted); }
+.et-band {
+  font-size: 10.5px; fill: var(--color-muted); letter-spacing: .08em;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.et-endlabel {
+  font-size: 12px; font-weight: 600; fill: var(--color-text);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Tooltip */
+.et-tip {
+  position: absolute;
+  pointer-events: none;
+  background: var(--color-text);
+  color: #fff;
+  border-radius: 5px;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  box-shadow: 0 4px 14px rgba(0,0,0,.18);
+  z-index: 5;
+  min-width: 150px;
+}
+.et-tip-head { font-weight: 600; white-space: nowrap; margin-bottom: 4px; }
+.et-tip-sub  { color: #a8a29e; font-weight: 400; font-size: 11px; }
+.et-tip-row  { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+.et-tip-key  { width: 12px; height: 2px; border-radius: 1px; flex-shrink: 0; }
+.et-tip-name { color: #d6d3d1; }
+.et-tip-val  { margin-left: auto; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* A hairline break between the breakdown pills and the summer toggle. */
+.et-pill-divider {
+  width: 1px;
+  align-self: stretch;
+  background: var(--color-border);
+  margin: 2px 4px;
+}
+
+/* Table view */
+.et-th     { text-align: left;  white-space: nowrap; }
+.et-th-num { text-align: right; white-space: nowrap; }
+.et-td-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text);
+}
+.et-td-muted { color: var(--color-muted); font-size: 12px; }

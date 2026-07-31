@@ -187,6 +187,7 @@ src/
     PianoInspiresGrant.jsx          Specialized report — see below
     UniqueGroupClassesBoard.jsx     Specialized report — see below
     Demographics.jsx                Specialized report — see below
+    EnrollmentTrends.jsx            Specialized report — see below
     LowIncomeYouthProgram.jsx       Specialized report — see below
     NeighborhoodChoirDemographics.jsx  Specialized report — see below
     DiscountCodes.jsx               Specialized report — see below
@@ -198,6 +199,7 @@ scripts/                     Local analysis tooling (Node, service_role key) —
   query.mjs                  Quick CLI table query: node scripts/query.mjs <table> "col=op.value" "select=..." limit=N
   neighborhood-choir-check.mjs  Verifies the Neighborhood Choir report by extracting its own pure-logic block and running it over live data
   income-base-check.mjs      Verifies the income percentage base (Decline to State excluded for income only) across both income-reporting reports
+  enrollment-trends-check.mjs  Verifies Enrollment Trends the same way — extracts its pure-logic block and reconciles every quarter bucket against live data
 supabase/
   migrations/
     001_initial_schema.sql   students, events, enrollments tables + indexes
@@ -406,6 +408,37 @@ Excluding `Decline to State` from income was a deliberate change (July 2026, at 
 
 ---
 
+#### Enrollment Trends
+
+The first **charted** report in the dashboard. Every quarter on file at once — the one thing a column-per-period table can't show. The Enrollment page answers "what were the numbers in the periods I picked?"; this answers "what shape is the program in?".
+
+**Two charts, one filter row.** A single breakdown selector scopes both charts and the table beneath them:
+
+| Breakdown | Series |
+|---|---|
+| Total | All enrollments (one line, no legend — the title names it) |
+| Branch | Mission · Richmond |
+| Lessons vs. classes | Private lessons · Group classes |
+| Tuition status | Fee-based · Tuition-free |
+
+- **Chart 1 — Enrollments by quarter.** Line chart across every quarter, ordered by the shared `quarterSortKey` so the axis runs Summer → Fall → Winter → Spring within each FY. Fiscal-year bands and separators sit under the axis; partial years are labelled `(partial)`. Crosshair + tooltip listing every series at that quarter, plus the quarter total. Endpoint values are direct-labelled, nudged apart only when they would collide.
+- **Chart 2 — Same season, year over year.** The same quarters regrouped so each season faces only itself, as stacked columns (one column per quarter, segments = the current breakdown). This is the honest way to read growth given the summer effect below.
+- **Table view** — every quarter × every split, including unique students. CSV export writes the same rows, respecting the summer filter.
+
+**Every breakdown partitions the quarter.** Mission + Richmond, lessons + group classes, and fee-based + tuition-free each sum back to that quarter's total. That's why the stacked columns always reach the same height whichever breakdown is showing, and it's asserted by the check script.
+
+**"Exclude summer quarters" toggle.** Summer is a genuinely short term — it averages **1,120 enrollments against 2,163** in the other three, 48% smaller — so a summer point between two full quarters reads as a collapse that never happened, and any quarter-over-quarter delta straddling one is mostly seasonality. The toggle drops summers from both charts, the table, and the CSV. Side effect worth knowing: it also removes any fiscal year whose only quarter on file is a summer one (currently FY27).
+
+**Counts are enrollment rows**, not students — a student in three classes counts three times. Unique students per quarter are in the table view and the CSV.
+
+**Colour.** Series use the two leading slots of the validated categorical palette (blue `#2a78d6`, orange `#eb6834`), *not* the CMC green. Green is a brand colour that has never been checked for colour-vision separation; these two clear the adjacent-pair gate with a wide margin (CVD ΔE 24.7). Green stays UI chrome — pills, focus rings. Chart furniture (`.et-*` classes in `index.css`) follows the app's own tokens.
+
+**Data loading:** single-phase. One paginated fetch (1000/batch) of every enrollment joined to `events(location, activity_type)`; all bucketing client-side. Unlike the Enrollment page there is no period selector — the report is *about* every period, so it loads them all (~32 requests, 31,561 rows).
+
+**Verification:** `node scripts/enrollment-trends-check.mjs` extracts the report's own pure-logic block (between the `pure logic` markers) and runs it over live data — no reimplementation. It reconciles bucketed + unparseable = fetched (31,561 + 0), asserts all three splits partition every quarter with nothing unclassified, matches per-quarter unique students against an independent count, confirms strict sort-key ordering, and checks the summer filter keeps 12 + drops 5 = 17. It also prints season-over-season growth: Fall +18.8%, Winter +20.5%, Spring +16.8% FY23 → FY26, and the Winter breakdown that shows lessons +10 vs. group classes +404 against a +414 total.
+
+---
+
 #### Low-Income Youth Program (LIYP)
 
 Grant report on four low-income youth cohorts for **one or more selected fiscal years** (FY pills, multi-select). For each group it shows **unique students** (counted once per FY; every enrollment already qualifies since only ENROLLED/PEND import) and an **ethnicity** breakdown reusing the Demographics categories (Hispanic + Latinx merged; percentages out of the responded base, No Response excluded from the base). A de-duplicated **combined** total across all four groups is shown last. One CSV export covers all groups + combined.
@@ -497,4 +530,6 @@ Built to investigate a sliding-scale count discrepancy (a report of 200 vs a sta
 | Placeholder birthdates (`1900-01-01`, age ~126) misclassifying youth classes | Fixed (July 2026) | Ages outside 0–100 treated as unknown (`MAX_PLAUSIBLE_AGE`); Teen Jazz Orchestra was showing Adult in the Board report. Same guard applied in LIYP and Discount Codes |
 | Tuition-free programs record `$0` discount inconsistently in ASAP | Accepted / design | YMP, Children's Chorus, Teen Jazz often store `amount=0, total_discount=0` (varies by year — a billing-practice artifact). Summing discounts undercounts them; LIYP therefore dropped tuition-assistance figures entirely |
 | `Decline to State` deflating income percentages | Changed by request (July 2026) | Income percentages now exclude `Decline to State` **and** `No Response` from the base, so they describe only students who named a bracket. Ethnicity/gender still exclude only `No Response`. Applied in one place (`INCOME_PCT_EXCLUDED`) so every demographic report moved together. Big shift: all-students FY26 low-income share 62.4% → 92.1%; Neighborhood Choir FY26 56.1% → 99.0%. Verified by `scripts/income-base-check.mjs` |
+| Summer quarters read as a collapse in any time series | By design | Summer genuinely runs ~48% smaller (1,120 vs 2,163 average). Enrollment Trends offers an **Exclude summer quarters** toggle and a season-vs-season chart rather than smoothing the data |
+| Newest fiscal year is normally partial | By design | Enrollment Trends labels partial years `(partial)` on the axis; growth should be read season-to-same-season, never off the last bar. FY27 currently holds only Summer 2026 |
 | Tables readable only by `authenticated` role (anon/service_role denied) | Fixed (July 2026) | One-time `GRANT SELECT ... TO service_role` in Supabase SQL editor enables local `scripts/` querying; service_role key kept in gitignored `.env` |
