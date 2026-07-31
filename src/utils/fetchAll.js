@@ -11,11 +11,22 @@
 //    costs nothing measurable once the pages are issued concurrently.
 //
 // The speed comes from issuing the pages in parallel instead of one after
-// another. Measured against the live database on the enrollments table
-// (31,561 rows, 32 pages): 3,643 ms sequential with a nested events() join →
-// 499 ms fetching enrollments and events flat, in parallel, and joining them in
-// the client. Same rows, 0 orphans. The nested join was the expensive part, not
-// the ordering.
+// another, and from not asking PostgREST for a nested join.
+//
+// Measure in the BROWSER, with the anon key. A script using the service_role key
+// bypasses Row Level Security entirely and is roughly 6x faster per page, so it
+// badly understates what a user waits for — 1000 enrollment rows take ~105 ms
+// from Node with service_role and ~640 ms in the browser under RLS.
+//
+// Enrollments (31,561 rows, 32 pages), production build, real session:
+//
+//                                          node+service_role     browser+RLS
+//   sequential pages, nested events() join       3.6 s              25.3 s
+//   parallel pages, flat, joined client-side     0.5 s               5.8 s
+//
+// Same rows either way, 0 orphans. Note the remaining 5.8 s is mostly RLS
+// evaluation over 50k rows: the real fix for a report that only needs 17 numbers
+// is to aggregate server-side and return 17 rows, not to fetch faster.
 //
 // One caveat: the row count is read first, so rows inserted between the count
 // and the page fetches would fall outside the last page. This dashboard is

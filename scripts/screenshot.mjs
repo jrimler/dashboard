@@ -81,7 +81,15 @@ const consoleErrors = []
 const failedRequests = []
 page.on('console', m => { if (m.type() === 'error') consoleErrors.push(m.text()) })
 page.on('pageerror', e => consoleErrors.push(`[pageerror] ${e.message}`))
-page.on('requestfailed', r => failedRequests.push(`${r.method()} ${r.url()} — ${r.failure()?.errorText}`))
+// React.StrictMode double-invokes effects in dev, so the first mount's in-flight
+// requests are aborted when it unmounts. That is expected dev noise, not a fault.
+const abortedRequests = []
+page.on('requestfailed', r => {
+  const err = r.failure()?.errorText ?? ''
+  const line = `${r.method()} ${r.url()} — ${err}`
+  if (err.includes('ERR_ABORTED')) abortedRequests.push(line)
+  else failedRequests.push(line)
+})
 
 let failures = 0
 const check = (ok, msg) => { if (!ok) failures++; console.log(`${ok ? '  ok  ' : ' FAIL '} ${msg}`) }
@@ -96,9 +104,34 @@ await page.click('button[type="submit"]')
 await page.waitForSelector('.sidebar', { timeout: 20000 })
 console.log('Logged in.')
 
+// App.jsx deliberately redirects the first authenticated load to /reports
+// regardless of the entry URL, so a page.goto() to a deep link gets bounced.
+// Navigate the way a person does — through the UI — which also exercises the
+// real routing rather than a cold boot the app never intends to serve.
+async function navigateInApp(target) {
+  const SIDEBAR = { '/reports': 'Reports', '/enrollment': 'Enrollment', '/retention': 'Retention', '/classes': 'Classes', '/upload': 'Upload' }
+
+  if (SIDEBAR[target]) {
+    await page.click(`.sidebar-nav >> text="${SIDEBAR[target]}"`)
+    return
+  }
+
+  const reportMatch = target.match(/^\/reports\/(.+)$/)
+  if (!reportMatch) throw new Error(`Don't know how to reach ${target} through the UI`)
+
+  // Cards are labelled, not id-ed, so map id → label from the registry source.
+  const registry = readFileSync(join(root, 'src/reports/registry.js'), 'utf8')
+  const entry = new RegExp(`id:\\s*'${reportMatch[1]}'[\\s\\S]{0,200}?label:\\s*'([^']+)'`).exec(registry)
+  if (!entry) throw new Error(`No report with id '${reportMatch[1]}' in registry.js`)
+
+  await page.click('.sidebar-nav >> text="Reports"')
+  await page.waitForSelector('.sr-card, .report-card, button', { timeout: 10000 })
+  await page.click(`text="${entry[1]}"`)
+}
+
 console.log(`Navigating to ${route}…`)
 const t0 = Date.now()
-await page.goto(`${BASE}${route}`, { waitUntil: 'networkidle' })
+await navigateInApp(route)
 
 // Reports fetch after mount; wait for the loading placeholder to clear.
 try {
@@ -116,13 +149,19 @@ console.log(`Rendered in ${(loadMs / 1000).toFixed(1)}s\n`)
 console.log('Page health')
 check(consoleErrors.length === 0, `no console errors${consoleErrors.length ? ':\n        ' + consoleErrors.slice(0, 5).join('\n        ') : ''}`)
 check(failedRequests.length === 0, `no failed requests${failedRequests.length ? ':\n        ' + failedRequests.slice(0, 5).join('\n        ') : ''}`)
+if (abortedRequests.length) console.log(`        (${abortedRequests.length} aborted requests — expected: StrictMode double-invokes effects in dev)`)
 check(!(await page.locator('.error-banner').count()), 'no error banner on the page')
 
 // The blank-chart guard: an <svg> must exist, have real layout size, and
 // actually contain drawn marks.
 const svgCount = await page.locator('svg').count()
+console.log(`\nCharts — ${svgCount} svg element(s) on the page`)
+// A route that is supposed to be charted and isn't is the whole reason this
+// script exists; don't let a zero slide past as "nothing to check".
+if (route.includes('enrollment-trends')) {
+  check(svgCount >= 2, `Enrollment Trends renders both charts (found ${svgCount})`)
+}
 if (svgCount > 0) {
-  console.log('\nCharts')
   const svgStats = await page.$$eval('svg', nodes => nodes.map(n => {
     const r = n.getBoundingClientRect()
     return {

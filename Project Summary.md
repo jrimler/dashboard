@@ -520,17 +520,20 @@ Pages were originally fetched **one after another** in a `while` loop. That is c
 - **Always paginate.** An unpaginated query silently caps at 1000 rows and returns no error.
 - **`orderBy` is required and must be unique.** PostgREST's `.range()` is an `OFFSET`; without a stable sort, Postgres may order rows differently per request and concurrent pages can overlap or skip. Ordering by the primary key costs nothing measurable once the pages run in parallel — verified by re-fetching and confirming 31,561 rows / 31,561 unique ids.
 
-Measured against the live database (enrollments, 31,561 rows, 32 pages):
+**Measure in the browser, not from a script.** `scripts/db.mjs` uses the `service_role` key, which bypasses Row Level Security and is ~6× faster per page than a real session — 1000 enrollment rows take ~105 ms from Node but ~640 ms in the browser under RLS. A script-based benchmark will tell you the change is 7× better than it really is.
 
-| Strategy | Time |
-|---|---|
-| Sequential pages with a nested `events(...)` join — the original | 3,643 ms |
-| Parallel pages, still with the nested join | 1,836 ms |
-| **Parallel pages, both tables flat, joined client-side** | **499 ms** |
+Enrollments (31,561 rows, 32 pages), production build, real logged-in session:
 
-The nested join was the expensive part, not the ordering. `joinBy(rows, related, { on, as })` does the client-side join that replaces it.
+| Strategy | node + `service_role` | **browser + anon key (what users get)** |
+|---|---|---|
+| Sequential pages, nested `events(...)` join — the original | 3.6 s | **25.3 s** |
+| Parallel pages, both tables flat, joined client-side | 0.5 s | **5.8 s** |
 
-Only **Enrollment Trends** uses this so far. The other reports still use the sequential loop and would each get a similar speedup by adopting it — a mechanical change, one report at a time.
+End to end on the production build, clicking the card until both charts are on screen: **7.4 s**. The nested join was the expensive part, not the ordering. `joinBy(rows, related, { on, as })` does the client-side join that replaces it.
+
+Only **Enrollment Trends** uses this so far. The other reports still use the sequential loop and would each get a similar 3–4× speedup by adopting it — a mechanical change, one report at a time.
+
+**The remaining 5.8 s is RLS evaluation over ~50k rows**, and no client-side change removes it. A report that needs 17 numbers should not ship 50,733 rows to the browser to compute them; the real fix is a Postgres view or `rpc()` that returns the 17 aggregated rows. That is a schema change and has not been done.
 
 ---
 
@@ -570,7 +573,7 @@ For the trends report it also captures the Branch, Lessons-vs-classes, and summe
 | Tuition-free programs record `$0` discount inconsistently in ASAP | Accepted / design | YMP, Children's Chorus, Teen Jazz often store `amount=0, total_discount=0` (varies by year — a billing-practice artifact). Summing discounts undercounts them; LIYP therefore dropped tuition-assistance figures entirely |
 | `Decline to State` deflating income percentages | Changed by request (July 2026) | Income percentages now exclude `Decline to State` **and** `No Response` from the base, so they describe only students who named a bracket. Ethnicity/gender still exclude only `No Response`. Applied in one place (`INCOME_PCT_EXCLUDED`) so every demographic report moved together. Big shift: all-students FY26 low-income share 62.4% → 92.1%; Neighborhood Choir FY26 56.1% → 99.0%. Verified by `scripts/income-base-check.mjs` |
 | Charts rendered blank (Enrollment Trends) | Fixed (July 2026) | The width hook used `useLayoutEffect(…, [ref])` on a `useRef` object, so it ran once while the measured element was still the "Loading…" placeholder and never re-ran — width stayed 0 and both charts returned `null`. Now a **callback ref**, which re-runs the effect when the node actually attaches. Caught only by looking at the page; `scripts/screenshot.mjs` now asserts svg size and mark count |
-| Sequential pagination made every page slow | Fixed for Enrollment Trends (July 2026) | `src/utils/fetchAll.js` issues pages in parallel and joins related tables client-side: 3,643 ms → 499 ms. Other reports still use the sequential loop and can adopt it one at a time |
+| Sequential pagination made every page slow | Improved for Enrollment Trends (July 2026) | `src/utils/fetchAll.js` issues pages in parallel and joins related tables client-side. In the browser under RLS: **25.3 s → 5.8 s** (a `service_role` script shows 3.6 s → 0.5 s and badly understates both — it bypasses RLS). Still 7.4 s click-to-charts; the floor is RLS over ~50k rows, which only server-side aggregation removes. Other reports still use the sequential loop |
 | Summer quarters read as a collapse in any time series | By design | Summer genuinely runs ~48% smaller (1,120 vs 2,163 average). Enrollment Trends offers an **Exclude summer quarters** toggle and a season-vs-season chart rather than smoothing the data |
 | Newest fiscal year is normally partial | By design | Enrollment Trends labels partial years `(partial)` on the axis; growth should be read season-to-same-season, never off the last bar. FY27 currently holds only Summer 2026 |
 | Tables readable only by `authenticated` role (anon/service_role denied) | Fixed (July 2026) | One-time `GRANT SELECT ... TO service_role` in Supabase SQL editor enables local `scripts/` querying; service_role key kept in gitignored `.env` |
