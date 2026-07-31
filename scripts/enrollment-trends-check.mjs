@@ -40,7 +40,7 @@ const moduleSrc = [
 
 const scratch = join(mkdtempSync(join(tmpdir(), 'entrends-')), 'extracted.mjs')
 writeFileSync(scratch, moduleSrc)
-const { buildQuarterSeries, applySummerFilter } = await import(scratch)
+const { buildQuarterSeries, applySummerFilter, seasonSummary } = await import(scratch)
 
 // ─── fetch, exactly as the report does ──────────────────────────────────────
 // Mirrors src/utils/fetchAll.js: both tables flat and paginated in parallel,
@@ -164,6 +164,28 @@ console.log(`        Winter ${wa.fy}→${wb.fy} breakdown: total ${growth.total 
             `Mission ${growth.mission >= 0 ? '+' : ''}${growth.mission}, Richmond ${growth.richmond >= 0 ? '+' : ''}${growth.richmond}`)
 check(growth.lesson + growth.klass === growth.total,
   'lesson + class growth accounts for the whole change in total')
+
+// ── 7. The PDF cover page's season summary ──────────────────────────────────
+// These figures are printed in a document people hand to a board, so they get
+// checked against the series rather than trusted.
+console.log('\nPDF cover — growth by season')
+const summary = seasonSummary(series)
+check(summary.length === 4, `all four seasons summarised (got ${summary.length})`)
+for (const s of summary) {
+  const qs = series.filter(q => q.season === s.season)
+  const okEnds = s.first.timePeriod === qs[0].timePeriod &&
+                 s.last.timePeriod === qs[qs.length - 1].timePeriod
+  const okChange = s.change === s.last.enrollments - s.first.enrollments
+  const okPct = Math.abs(s.pct - (s.change / s.first.enrollments) * 100) < 1e-9
+  check(okEnds && okChange && okPct,
+    `${s.season.padEnd(7)} ${s.first.fy} ${String(s.first.enrollments).padStart(5)} → ` +
+    `${s.last.fy} ${String(s.last.enrollments).padStart(5)}  ` +
+    `${s.change >= 0 ? '+' : ''}${s.change} (${s.pct >= 0 ? '+' : ''}${s.pct.toFixed(1)}%)`)
+}
+// Summer is the season whose latest entry falls in the partial fiscal year;
+// the comparison is still like-for-like, which is the point of the table.
+const summerRow = summary.find(s => s.season === 'Summer')
+console.log(`        note: Summer's latest is ${summerRow.last.label} (${summerRow.last.fy}), a complete quarter of an incomplete year`)
 
 // ── Per-quarter table ───────────────────────────────────────────────────────
 console.log('\nQuarter            FY     Enroll  Studs  Mission   Rich  Lesson   Class   Free    Fee')

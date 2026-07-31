@@ -76,6 +76,25 @@ await waitForServer()
 const browser = await chromium.launch()
 const page = await browser.newPage({ viewport: { width: WIDTH, height: 1000 } })
 
+// Stub window.print so the PDF packet stays mounted long enough to inspect.
+// Headless fires 'afterprint' immediately, which unmounts it before any
+// assertion can see it — the first version of this check reported "0 sections"
+// for a packet that had rendered perfectly well.
+await page.addInitScript(() => {
+  window.__printSnapshot = null
+  window.print = () => {
+    const svgs = [...document.querySelectorAll('.et-print svg')]
+    window.__printSnapshot = {
+      sections: document.querySelectorAll('.et-print-page').length,
+      svgs: svgs.length,
+      empty: svgs.filter(n => {
+        const r = n.getBoundingClientRect()
+        return r.width < 100 || n.querySelectorAll('path,line').length === 0
+      }).length,
+    }
+  }
+})
+
 // Anything the page complains about is a finding, not noise.
 const consoleErrors = []
 const failedRequests = []
@@ -208,6 +227,48 @@ if (route.includes('enrollment-trends')) {
     await page.screenshot({ path: f, fullPage: true })
     console.log(`Screenshot → ${f.replace(root + '/', '')}`)
   }
+}
+
+// ─── PDF packet ─────────────────────────────────────────────────────────────
+// Letter landscape at 0.5in margins is a 960x720 printable area. A section
+// taller than 720px silently spills onto a second sheet, which turned the
+// 10-page packet into 18 the first time round — so the height is asserted, not
+// eyeballed.
+if (route.includes('enrollment-trends')) {
+  console.log('\nPDF export')
+  const PAGE_H = 720
+  await page.click('text="Export PDF"')
+  await page.waitForFunction(() => window.__printSnapshot !== null, { timeout: 20000 })
+  const snap = await page.evaluate(() => window.__printSnapshot)
+
+  check(snap.sections === 10, `packet has 10 sections — cover + 8 variations + table (got ${snap.sections})`)
+  check(snap.svgs === 16, `packet has 16 charts — 8 variations x 2 (got ${snap.svgs})`)
+  check(snap.empty === 0, `no blank charts in the packet (${snap.empty} blank)`)
+
+  await page.setViewportSize({ width: 960, height: PAGE_H })
+  await page.emulateMedia({ media: 'print' })
+  await page.waitForTimeout(400)
+
+  // #root is hidden by an @media print rule, so this is only true under print
+  // media — checking it at print() time reads the screen value and fails.
+  const rootHidden = await page.evaluate(() => getComputedStyle(document.getElementById('root')).display)
+  check(rootHidden === 'none', `the app itself is hidden in print (#root display: ${rootHidden})`)
+
+  const heights = await page.$$eval('.et-print-page', ns => ns.map(n => Math.round(n.getBoundingClientRect().height)))
+  const tall = heights.filter(h => h > PAGE_H)
+  check(tall.length === 0,
+    `every section fits one ${PAGE_H}px page (tallest ${Math.max(...heights)}px)` +
+    (tall.length ? ` — ${tall.length} spill onto a second sheet` : ''))
+
+  const pdf = join(outDir, 'enrollment-trends.pdf')
+  await page.pdf({
+    path: pdf, format: 'Letter', landscape: true, printBackground: true,
+    margin: { top: '0.5in', bottom: '0.5in', left: '0.5in', right: '0.5in' },
+  })
+  const pdfPages = (readFileSync(pdf).toString('latin1').match(/\/Type\s*\/Page[^s]/g) ?? []).length
+  check(pdfPages === 10, `rendered PDF is 10 pages (got ${pdfPages})`)
+  console.log(`PDF        → ${pdf.replace(root + '/', '')}`)
+  await page.emulateMedia({ media: 'screen' })
 }
 
 await browser.close()

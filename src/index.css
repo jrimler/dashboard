@@ -1247,3 +1247,108 @@
   color: var(--color-text);
 }
 .et-td-muted { color: var(--color-muted); font-size: 12px; }
+
+/* ── Enrollment Trends — PDF export ──
+   The packet is mounted only while printing, in a portal on <body>. It sits
+   off-screen rather than display:none, because a hidden element measures 0 wide
+   and the charts would draw nothing (print charts take an explicit width, but
+   keeping it laid out means what prints is what was measured). */
+.et-export-actions { display: flex; gap: 8px; align-items: center; }
+.et-export-actions .period-clear-btn:disabled { opacity: .55; cursor: default; }
+
+.et-print {
+  position: absolute;
+  left: -100000px;
+  top: 0;
+  width: 980px;
+  background: #fff;
+  color: var(--color-text);
+}
+
+.et-print-page { padding: 0 0 24px; }
+.et-print-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: 8px;
+  margin-bottom: 14px;
+}
+.et-print-head h2 { font-size: 17px; font-weight: 650; letter-spacing: -.01em; }
+.et-print-sub { font-size: 11.5px; color: var(--color-muted); max-width: 78ch; margin-top: 3px; }
+
+.et-print-chart-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #44403c;
+  margin: 10px 0 2px;
+}
+
+.et-print-foot {
+  margin-top: 14px;
+  padding-top: 6px;
+  border-top: 1px solid var(--color-border);
+  font-size: 10px;
+  color: var(--color-muted);
+  letter-spacing: .04em;
+}
+
+/* Cover */
+.et-print-cover h1 { font-size: 30px; font-weight: 650; letter-spacing: -.02em; margin-top: 4px; }
+.et-print-eyebrow {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px; letter-spacing: .14em; text-transform: uppercase;
+  color: var(--color-muted);
+}
+.et-print-coverage { font-size: 13px; color: #44403c; margin-top: 6px; }
+.et-print-section-title {
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em;
+  color: var(--color-muted);
+  margin: 26px 0 8px;
+}
+.et-print-note { font-size: 12px; color: #44403c; max-width: 88ch; line-height: 1.55; }
+
+/* Print tables are plain — the app's dark header would flood a page with ink. */
+.et-print-table { border-collapse: collapse; font-size: 12px; margin-top: 6px; }
+.et-print-table.wide { width: 100%; }
+.et-print-table th {
+  text-align: left;
+  font-size: 10px; text-transform: uppercase; letter-spacing: .06em;
+  color: var(--color-muted); font-weight: 700;
+  border-bottom: 1px solid #a8a29e;
+  padding: 4px 12px 4px 0;
+}
+.et-print-table td {
+  padding: 4px 12px 4px 0;
+  border-bottom: 1px solid #eceae7;
+  font-variant-numeric: tabular-nums;
+}
+.et-print-table th.n, .et-print-table td.n { text-align: right; }
+
+@media print {
+  @page { size: letter landscape; margin: 0.5in; }
+
+  /* Keep fills — browsers drop background colour in print unless told not to. */
+  * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+
+  html, body { background: #fff !important; }
+
+  /* The whole app steps aside; only the packet prints. */
+  #root { display: none !important; }
+
+  .et-print {
+    position: static !important;
+    left: auto !important;
+    width: auto !important;
+  }
+
+  /* One variation per sheet; never split a chart across a page break. */
+  .et-print-page { break-after: page; page-break-after: always; padding-bottom: 0; }
+  .et-print-page:last-child { break-after: auto; page-break-after: auto; }
+  .et-plot, .et-print-table { break-inside: avoid; page-break-inside: avoid; }
+  .et-print-table tr { break-inside: avoid; page-break-inside: avoid; }
+
+  /* Tooltips are a screen affordance. */
+  .et-tip { display: none !important; }
+}

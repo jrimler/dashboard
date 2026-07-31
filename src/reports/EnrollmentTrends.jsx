@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useLayoutEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { supabase } from '../lib/supabase'
 import { fetchAll, joinBy } from '../utils/fetchAll'
 import { parseQuarter, quarterSortKey, quarterFYLabel, SEASON_SHORT } from '../utils/periodUtils'
@@ -115,6 +116,26 @@ export function applySummerFilter(series, excludeSummer) {
   return excludeSummer ? series.filter(q => q.season !== 'Summer') : series
 }
 
+// Earliest vs. latest occurrence of each season — the only honest single number
+// for "is this growing?", because it never compares a summer with a full term.
+// Shown on the PDF cover page, so it lives here where the check script sees it.
+export function seasonSummary(series) {
+  const seasons = ['Summer', 'Fall', 'Winter', 'Spring']
+  return seasons.flatMap(season => {
+    const qs = series.filter(q => q.season === season)
+    if (qs.length < 2) return []
+    const first = qs[0]
+    const last = qs[qs.length - 1]
+    const change = last.enrollments - first.enrollments
+    return [{
+      season,
+      first, last,
+      change,
+      pct: first.enrollments === 0 ? null : (change / first.enrollments) * 100,
+    }]
+  })
+}
+
 // ─── end pure logic ─────────────────────────────────────────────────────────
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -205,11 +226,11 @@ function Legend({ series, block }) {
 // Chart 1 — every quarter on one line
 // ─────────────────────────────────────────────────────────────────────────────
 
-function TimelineChart({ data, series, width }) {
+function TimelineChart({ data, series, width, plotHeight = 300 }) {
   const [tip, setTip] = useState(null)
   if (!width || data.length === 0) return null
 
-  const mL = 56, mR = 68, mT = 14, plotH = 300, axisH = 46
+  const mL = 56, mR = 68, mT = 14, plotH = plotHeight, axisH = 46
   const H = mT + plotH + axisH
   const x0 = mL, x1 = Math.max(mL + 60, width - mR)
   const axisY = mT + plotH
@@ -331,12 +352,12 @@ function TimelineChart({ data, series, width }) {
 // Chart 2 — the same quarters regrouped so each season faces only itself
 // ─────────────────────────────────────────────────────────────────────────────
 
-function SeasonChart({ data, series, width }) {
+function SeasonChart({ data, series, width, plotHeight = 280 }) {
   const [tip, setTip] = useState(null)
   if (!width || data.length === 0) return null
 
   const seasons = SEASONS.filter(s => data.some(d => d.season === s))
-  const mL = 56, mR = 16, mT = 14, plotH = 280, axisH = 52
+  const mL = 56, mR = 16, mT = 14, plotH = plotHeight, axisH = 52
   const H = mT + plotH + axisH
   const x0 = mL, x1 = Math.max(mL + 60, width - mR)
   const axisY = mT + plotH
@@ -428,6 +449,169 @@ function SeasonChart({ data, series, width }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// PDF export
+//
+// No PDF library: the charts are already SVG, so the browser's own print engine
+// writes them as vectors — crisp at any zoom, text still selectable — and the
+// bundle doesn't grow. "Export PDF" renders every variation into a packet and
+// calls window.print(); the viewer picks "Save as PDF" in the print dialog.
+//
+// The packet is rendered into a portal on <body> rather than inside the report,
+// so print CSS can simply hide #root. And it is positioned off-screen rather
+// than display:none — a hidden element has clientWidth 0, which is exactly what
+// left the on-screen charts blank once already. Print charts are given an
+// explicit width instead of measuring anything.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const PRINT_WIDTH = 940        // letter landscape, 0.5in margins, at 96dpi
+// Letter landscape at 0.5in margins gives a 720px-tall page. Measured under
+// print media, a variation came to 739px — every one spilled onto a second
+// sheet, turning a 10-page packet into 18. These heights plus dropping the
+// print-only bottom padding bring a section to ~685px, leaving real headroom
+// for printers that scale slightly.
+const PRINT_TIMELINE_H = 210
+const PRINT_SEASON_H = 200
+
+function PrintPacket({ quarters }) {
+  const generated = new Date().toLocaleDateString('en-US', {
+    year: 'numeric', month: 'long', day: 'numeric',
+  })
+  const summary = seasonSummary(quarters)
+  const coverage = quarters.length
+    ? `${quarters[0].label} – ${quarters[quarters.length - 1].label}`
+    : '—'
+
+  // Every combination of breakdown × summer handling, all quarters first.
+  const views = []
+  for (const excludeSummer of [false, true]) {
+    for (const key of MODE_ORDER) {
+      views.push({ key, excludeSummer, data: applySummerFilter(quarters, excludeSummer) })
+    }
+  }
+
+  return (
+    <div className="et-print">
+      {/* Cover */}
+      <section className="et-print-page et-print-cover">
+        <div className="et-print-eyebrow">CMC Dashboard</div>
+        <h1>Enrollment Trends</h1>
+        <p className="et-print-coverage">
+          {coverage} · {quarters.length} quarters · {generated}
+        </p>
+
+        <div className="et-print-section-title">Growth by season</div>
+        <p className="et-print-note">
+          Each season compared with the earliest year it appears — the only honest
+          single figure for growth, because it never measures a summer term against
+          a full one.
+        </p>
+        <table className="et-print-table">
+          <thead>
+            <tr>
+              <th>Season</th><th>Earliest</th><th></th><th>Most recent</th><th></th>
+              <th className="n">Change</th><th className="n">%</th>
+            </tr>
+          </thead>
+          <tbody>
+            {summary.map(s => (
+              <tr key={s.season}>
+                <td>{s.season}</td>
+                <td>{s.first.fy}</td>
+                <td className="n">{fmt(s.first.enrollments)}</td>
+                <td>{s.last.fy}</td>
+                <td className="n">{fmt(s.last.enrollments)}</td>
+                <td className="n">{s.change >= 0 ? '+' : ''}{fmt(s.change)}</td>
+                <td className="n">{s.pct === null ? '—' : `${s.pct >= 0 ? '+' : ''}${s.pct.toFixed(1)}%`}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+
+        <div className="et-print-section-title">What follows</div>
+        <p className="et-print-note">
+          Every way this report can be read: four breakdowns — total, branch,
+          lessons vs. group classes, and tuition status — each shown across all
+          quarters and again with summer quarters excluded, then the full data
+          table. Summer runs about half the size of the other terms, so the
+          summers-excluded pages are the ones to read for trend.
+        </p>
+      </section>
+
+      {/* One page per variation */}
+      {views.map(v => {
+        const cfg = MODES[v.key]
+        return (
+          <section className="et-print-page" key={`${v.key}-${v.excludeSummer}`}>
+            <header className="et-print-head">
+              <div>
+                <h2>{cfg.name}{v.excludeSummer ? ' · summers excluded' : ''}</h2>
+                <p className="et-print-sub">{cfg.caption}</p>
+              </div>
+              <Legend series={cfg.series} />
+            </header>
+
+            <div className="et-print-chart-title">
+              Enrollments by quarter — {v.data.length} quarters
+            </div>
+            <TimelineChart data={v.data} series={cfg.series} width={PRINT_WIDTH}
+                           plotHeight={PRINT_TIMELINE_H} />
+
+            <div className="et-print-chart-title">Same season, year over year</div>
+            <SeasonChart data={v.data} series={cfg.series} width={PRINT_WIDTH}
+                         plotHeight={PRINT_SEASON_H} />
+
+            <footer className="et-print-foot">
+              CMC Dashboard · Enrollment Trends · {generated}
+            </footer>
+          </section>
+        )
+      })}
+
+      {/* Data table */}
+      <section className="et-print-page">
+        <header className="et-print-head">
+          <div><h2>All quarters</h2>
+            <p className="et-print-sub">
+              Counts are enrollment rows; a student in three classes counts three
+              times. Students is the unique headcount for that quarter.
+            </p>
+          </div>
+        </header>
+        <table className="et-print-table wide">
+          <thead>
+            <tr>
+              <th>Quarter</th><th>FY</th>
+              <th className="n">Enrollments</th><th className="n">Students</th>
+              <th className="n">Mission</th><th className="n">Richmond</th>
+              <th className="n">Lessons</th><th className="n">Group Classes</th>
+              <th className="n">Fee-Based</th><th className="n">Tuition-Free</th>
+            </tr>
+          </thead>
+          <tbody>
+            {quarters.map(q => (
+              <tr key={q.timePeriod}>
+                <td>{q.label}</td><td>{q.fy}</td>
+                <td className="n">{fmt(q.enrollments)}</td>
+                <td className="n">{fmt(q.students)}</td>
+                <td className="n">{fmt(q.mission)}</td>
+                <td className="n">{fmt(q.richmond)}</td>
+                <td className="n">{fmt(q.lesson)}</td>
+                <td className="n">{fmt(q.klass)}</td>
+                <td className="n">{fmt(q.feeBased)}</td>
+                <td className="n">{fmt(q.tuitionFree)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <footer className="et-print-foot">
+          CMC Dashboard · Enrollment Trends · {generated}
+        </footer>
+      </section>
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // CSV export
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -468,6 +652,7 @@ export default function EnrollmentTrends() {
   const [mode, setMode]       = useState('total')
   const [excludeSummer, setExcludeSummer] = useState(false)
   const [infoOpen, setInfoOpen]           = useState(false)
+  const [printing, setPrinting]           = useState(false)
 
   // Each chart measures its own container rather than sharing one width, so a
   // future layout change to either card can't silently mis-size the other.
@@ -507,6 +692,25 @@ export default function EnrollmentTrends() {
 
   const cfg = MODES[mode]
   const summerCount = allQuarters.length - applySummerFilter(allQuarters, true).length
+
+  // The packet is 16 charts, so it is only mounted while printing. Two frames of
+  // wait let it lay out and paint before the print dialog snapshots the page;
+  // 'afterprint' — not a timer — decides when it can come back out of the DOM,
+  // so a viewer who sits in the dialog doesn't get a half-rendered PDF.
+  useEffect(() => {
+    if (!printing) return
+    const done = () => setPrinting(false)
+    window.addEventListener('afterprint', done)
+    let raf2
+    const raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => window.print())
+    })
+    return () => {
+      window.removeEventListener('afterprint', done)
+      cancelAnimationFrame(raf1)
+      cancelAnimationFrame(raf2)
+    }
+  }, [printing])
 
   if (loading) return <p className="coming-soon">Loading every quarter on file…</p>
 
@@ -578,9 +782,19 @@ export default function EnrollmentTrends() {
           <div className="period-selector">
             <div className="period-selector-header">
               <span className="period-selector-title">Break Down By</span>
-              <button className="period-clear-btn" onClick={() => exportCSV(shown, excludeSummer)}>
-                Export CSV
-              </button>
+              <div className="et-export-actions">
+                <button className="period-clear-btn" onClick={() => exportCSV(shown, excludeSummer)}>
+                  Export CSV
+                </button>
+                <button
+                  className="period-clear-btn"
+                  onClick={() => setPrinting(true)}
+                  disabled={printing}
+                  title="Every breakdown, with and without summer quarters, plus the data table — save as PDF from the print dialog"
+                >
+                  {printing ? 'Preparing…' : 'Export PDF'}
+                </button>
+              </div>
             </div>
             <div className="period-pills">
               {MODE_ORDER.map(k => (
@@ -669,6 +883,8 @@ export default function EnrollmentTrends() {
               </tbody>
             </table>
           </div>
+
+          {printing && createPortal(<PrintPacket quarters={allQuarters} />, document.body)}
         </>
       )}
     </div>

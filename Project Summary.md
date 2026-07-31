@@ -437,7 +437,20 @@ The first **charted** report in the dashboard. Every quarter on file at once —
 
 **Data loading:** single-phase, via `fetchAll` — enrollments and events fetched flat and in parallel, then joined client-side. Unlike the Enrollment page there is no period selector: the report is *about* every period, so it loads them all (31,561 enrollment rows + 19,172 event rows). Asking PostgREST for a nested `events(...)` join page by page took **3,643 ms**; the flat parallel version takes **499 ms** for the same rows with 0 orphans.
 
-**Verification:** `node scripts/enrollment-trends-check.mjs` extracts the report's own pure-logic block (between the `pure logic` markers) and runs it over live data — no reimplementation. It reconciles bucketed + unparseable = fetched (31,561 + 0), asserts all three splits partition every quarter with nothing unclassified, matches per-quarter unique students against an independent count, confirms strict sort-key ordering, and checks the summer filter keeps 12 + drops 5 = 17. It also prints season-over-season growth: Fall +18.8%, Winter +20.5%, Spring +16.8% FY23 → FY26, and the Winter breakdown that shows lessons +10 vs. group classes +404 against a +414 total.
+**Export — PDF.** One click writes a 10-page packet: a **cover** (coverage line, generated date, and a growth-by-season table comparing each season with the earliest year it appears), then **eight pages — every breakdown × with/without summer quarters**, each carrying both charts, then the **full data table**. No PDF library: the charts are already SVG, so the browser's own print engine writes them as vectors (crisp at any zoom, text selectable) and the bundle doesn't grow. The button opens the print dialog, where the viewer chooses "Save as PDF".
+
+Three things make it work, each a trap worth knowing:
+- The packet renders into a **portal on `<body>`**, so print CSS need only hide `#root`.
+- It is positioned **off-screen, never `display: none`** — a hidden element measures 0 wide, the exact failure that once left the on-screen charts blank. Print charts also take an **explicit width** rather than measuring.
+- It mounts **only while printing** (16 charts is too much to keep live), and unmounts on the `afterprint` event rather than a timer, so sitting in the print dialog can't produce a half-rendered PDF.
+
+Page fit is asserted, not eyeballed: letter landscape at 0.5in margins gives a 960×720 printable area, and a section taller than 720px silently spills onto a second sheet — which turned the packet into 18 pages the first time. Sections now measure 685px.
+
+**Export — CSV.** Flat table of the visible quarters, respecting the summer toggle.
+
+**Verification:** `node scripts/enrollment-trends-check.mjs` extracts the report's own pure-logic block (between the `pure logic` markers) and runs it over live data — no reimplementation. It reconciles bucketed + unparseable = fetched (31,561 + 0), asserts all three splits partition every quarter with nothing unclassified, matches per-quarter unique students against an independent count, confirms strict sort-key ordering, and checks the summer filter keeps 12 + drops 5 = 17. It also re-derives the PDF cover's growth-by-season table from the series (Summer +7.2%, Fall +18.8%, Winter +20.5%, Spring +16.8%) — those figures go into a document people hand to a board, so they are checked rather than trusted — and prints the Winter breakdown showing lessons +10 vs. group classes +404 against a +414 total.
+
+`node scripts/screenshot.mjs` additionally asserts the PDF packet end to end: 10 sections, 16 charts, none blank, `#root` hidden under print media, every section within one page, and the rendered PDF exactly 10 pages.
 
 ---
 
