@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, Fragment } from 'react'
+import { useState, useEffect, useMemo, useRef, Fragment } from 'react'
 import { supabase } from '../lib/supabase'
 import {
   fySortKey, quarterSortKey, parseQuarter, quarterFYLabel, periodLabel,
@@ -425,6 +425,11 @@ export default function Demographics() {
   const [sortDir, setSortDir]               = useState('asc')
   const [expandedKey, setExpandedKey]       = useState(null)
 
+  // Only the newest fetch may commit its result. Switching periods starts
+  // overlapping fetches, and an earlier one resolving last would render the
+  // previous period's demographics under the newly selected period's label.
+  const loadSeq = useRef(0)
+
   // Phase 1: lightweight mount fetch of time_period + fiscal_year for pills only
   useEffect(() => { loadPeriods() }, [])
 
@@ -476,11 +481,16 @@ export default function Demographics() {
   // Phase 2: full fetch on period selection
   useEffect(() => {
     setExpandedKey(null)
-    if (!selectedPeriod) { setEnrollments([]); setError(null); return }
+    if (!selectedPeriod) {
+      loadSeq.current++
+      setEnrollments([]); setError(null); setLoading(false)
+      return
+    }
     loadData(selectedPeriod)
   }, [selectedPeriod])
 
   async function loadData(period) {
+    const seq = ++loadSeq.current
     setLoading(true)
     setError(null)
 
@@ -497,12 +507,14 @@ export default function Demographics() {
         `)
         .eq(column, period.value)
         .range(from, from + PAGE - 1)
+      if (seq !== loadSeq.current) return          // superseded mid-fetch
       if (error) { setError(error.message); setLoading(false); return }
       all = all.concat(data)
       if (data.length < PAGE) break
       from += PAGE
     }
 
+    if (seq !== loadSeq.current) return
     setEnrollments(all)
     setLoading(false)
   }

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { fySortKey } from '../utils/periodUtils'
 import {
@@ -293,6 +293,12 @@ export default function NeighborhoodChoirDemographics() {
   const [infoOpen, setInfoOpen]             = useState(false)
   const [coursesOpen, setCoursesOpen]       = useState(false)
 
+  // Only the newest demographic fetch may commit its result. Clicking FY pills
+  // in quick succession starts overlapping fetches, and the earlier (smaller,
+  // but not necessarily faster) one could resolve last and overwrite the newer
+  // one — the just-added year then rendered as 0 students in a grant report.
+  const loadSeq = useRef(0)
+
   useEffect(() => { loadPeriods() }, [])
 
   // Phase 1: which fiscal years the program actually ran in, so the pills only
@@ -328,7 +334,13 @@ export default function NeighborhoodChoirDemographics() {
   const fyKey = orderedFYs.join('|')
 
   useEffect(() => {
-    if (orderedFYs.length === 0) { setEnrollments([]); setError(null); return }
+    // Clearing the selection also supersedes any fetch still in flight, so it
+    // can't repopulate the tables after the user emptied them.
+    if (orderedFYs.length === 0) {
+      loadSeq.current++
+      setEnrollments([]); setError(null); setLoading(false)
+      return
+    }
     loadData(orderedFYs)
   }, [fyKey])
 
@@ -336,6 +348,7 @@ export default function NeighborhoodChoirDemographics() {
   // happens client-side in collectStudents (the course name lives on `events`,
   // so filtering it server-side would mean a second round trip for event IDs).
   async function loadData(fys) {
+    const seq = ++loadSeq.current
     setLoading(true)
     setError(null)
     const PAGE = 1000
@@ -350,11 +363,13 @@ export default function NeighborhoodChoirDemographics() {
         `)
         .in('fiscal_year', fys)
         .range(from, from + PAGE - 1)
+      if (seq !== loadSeq.current) return          // superseded mid-fetch
       if (error) { setError(error.message); setLoading(false); return }
       all = all.concat(data)
       if (data.length < PAGE) break
       from += PAGE
     }
+    if (seq !== loadSeq.current) return
     setEnrollments(all)
     setLoading(false)
   }
