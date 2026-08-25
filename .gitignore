@@ -9,3 +9,7 @@ dist/
 
 # Playwright screenshots from scripts/screenshot.mjs — local visual checks, not artifacts
 screenshots/
+
+# Hand-built student rosters used to reconcile report counts — contain student
+# names, same reason the ASAP exports above are ignored. Never commit.
+*student list*.txt

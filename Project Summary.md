@@ -201,6 +201,8 @@ scripts/                     Local analysis tooling (Node, service_role key) —
   neighborhood-choir-check.mjs  Verifies the Neighborhood Choir report by extracting its own pure-logic block and running it over live data
   income-base-check.mjs      Verifies the income percentage base (Decline to State excluded for income only) across both income-reporting reports
   enrollment-trends-check.mjs  Verifies Enrollment Trends the same way — extracts its pure-logic block and reconciles every quarter bucket against live data
+  sliding-trend.mjs          Ad-hoc: sliding-scale (Child* discount) enrollment trend over time
+  teen-jazz-list.mjs         Ad-hoc: lists the unique Teen Jazz Orchestra students LIYP counts for a fiscal year, to reconcile the count by hand (prints names — keep output local)
   screenshot.mjs             Headless-browser visual check: starts the dev server, logs in, asserts the page rendered, writes screenshots/ (see Seeing the app below)
 supabase/
   migrations/
