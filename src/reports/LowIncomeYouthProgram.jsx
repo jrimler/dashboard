@@ -1,7 +1,13 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { fySortKey } from '../utils/periodUtils'
-import { NO_RESPONSE, ethnicityLabelFor } from './demographicCategories'
+import {
+  NO_RESPONSE, INCOME_ORDER,
+  INCOME_PCT_EXCLUDED, RESPONSE_PCT_EXCLUDED, pctBase, bucketPct,
+  incomeCategoryFor, ethnicityLabelFor, genderLabelFor,
+} from './demographicCategories'
+
+// ─── pure logic (verified by scripts/liyp-check.mjs) ─────────────────────────
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Group definitions (LIYP grant categories)
@@ -51,18 +57,39 @@ const GROUPS = [
 ]
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Utilities
+// Dimensions
+//
+// The three breakdowns each group reports, in display order. Category labels
+// and percentage bases come from demographicCategories.js, shared with the
+// Demographics and Neighborhood Choir reports — a grant report that disagreed
+// with Demographics about what counts as "Low" income would be a bug. `order`
+// fixes the row order for income (a logical scale); ethnicity and gender order
+// by count, which varies year to year. `excluded` is what the percentage base
+// leaves out — income also drops "Decline to State", so income percentages
+// cover only students who named a bracket.
 // ─────────────────────────────────────────────────────────────────────────────
 
-function esc(v) { return `"${String(v ?? '').replace(/"/g, '""')}"` }
+const DIMENSIONS = [
+  {
+    id: 'income', title: 'Household income', order: INCOME_ORDER,
+    excluded: INCOME_PCT_EXCLUDED, baseNote: '% of students who named a bracket',
+    valueOf: s => incomeCategoryFor(s.income),
+  },
+  {
+    id: 'ethnicity', title: 'Ethnicity', order: null,
+    excluded: RESPONSE_PCT_EXCLUDED, baseNote: '% of students who responded',
+    valueOf: s => ethnicityLabelFor(s.ethnicity),
+  },
+  {
+    id: 'gender', title: 'Gender', order: null,
+    excluded: RESPONSE_PCT_EXCLUDED, baseNote: '% of students who responded',
+    valueOf: s => genderLabelFor(s.gender),
+  },
+]
 
-function triggerDownload(csv, filename) {
-  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }))
-  Object.assign(document.createElement('a'), { href: url, download: filename }).click()
-  URL.revokeObjectURL(url)
-}
-
-function today() { return new Date().toISOString().slice(0, 10) }
+// ─────────────────────────────────────────────────────────────────────────────
+// Utilities
+// ─────────────────────────────────────────────────────────────────────────────
 
 // Age in full years of a person born on birthdateStr as of referenceDateStr.
 function ageAtDate(birthdateStr, referenceDateStr) {
@@ -74,34 +101,41 @@ function ageAtDate(birthdateStr, referenceDateStr) {
   return age
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Ethnicity breakdown (descending count, No Response last; percentages out of
-// the responded base, matching the Demographics report)
-// ─────────────────────────────────────────────────────────────────────────────
+// Record a student in a group, backfilling demographic fields from whichever
+// enrollment row has them (they come from the same student record, so this only
+// guards against a missing join).
+function remember(map, cid, s) {
+  const cur = map.get(cid)
+  if (!cur) {
+    map.set(cid, {
+      ethnicity: s.ethnicity        ?? null,
+      gender:    s.gender           ?? null,
+      income:    s.household_income ?? null,
+    })
+    return
+  }
+  if (cur.ethnicity == null && s.ethnicity        != null) cur.ethnicity = s.ethnicity
+  if (cur.gender    == null && s.gender           != null) cur.gender    = s.gender
+  if (cur.income    == null && s.household_income != null) cur.income    = s.household_income
+}
 
-function ethnicityBreakdown(studentsMap) {
-  const total = studentsMap.size
+// Counts per category for one dimension, with the percentage base that
+// dimension's exclusions leave. Excluded labels keep their count and get no
+// percentage.
+function dimensionBreakdown(students, dim) {
   const counts = {}
-  for (const s of studentsMap.values()) {
-    const label = ethnicityLabelFor(s.ethnicity)
+  for (const s of students.values()) {
+    const label = dim.valueOf(s)
     counts[label] = (counts[label] ?? 0) + 1
   }
-  const base = total - (counts[NO_RESPONSE] ?? 0)
-  return {
-    total,
-    base,
-    buckets: Object.entries(counts)
-      .sort(([la, ca], [lb, cb]) => {
-        if (la === NO_RESPONSE) return 1
-        if (lb === NO_RESPONSE) return -1
-        return cb - ca || la.localeCompare(lb)
-      })
-      .map(([label, count]) => ({
-        label,
-        count,
-        pct: label === NO_RESPONSE || base === 0 ? null : (count / base) * 100,
-      })),
-  }
+  const total = students.size
+  return { total, base: pctBase(counts, total, dim.excluded), counts, excluded: dim.excluded }
+}
+
+function breakdownsFor(students) {
+  const dims = {}
+  for (const d of DIMENSIONS) dims[d.id] = dimensionBreakdown(students, d)
+  return { uniqueStudents: students.size, dims }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -109,22 +143,15 @@ function ethnicityBreakdown(studentsMap) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function buildReport(enrollments) {
-  // Per-group accumulators (customer_id → { ethnicity })
+  // Per-group accumulators (customer_id → demographic fields)
   const acc = {}
-  for (const g of GROUPS) acc[g.id] = { students: new Map() }
-  const slidingSeen     = new Set()  // any customer with a sliding-scale or merit discount, any age
-  const combinedStudents = new Map() // deduped union across all four groups
+  for (const g of GROUPS) acc[g.id] = new Map()
+  const slidingSeen      = new Set()  // any customer with a sliding-scale or merit discount, any age
+  const combinedStudents = new Map()  // deduped union across all four groups
 
   function addMember(groupId, cid, student) {
-    const a = acc[groupId]
-    if (!a.students.has(cid)) a.students.set(cid, { ethnicity: student.ethnicity ?? null })
-    else if (a.students.get(cid).ethnicity == null && student.ethnicity != null) {
-      a.students.get(cid).ethnicity = student.ethnicity
-    }
-    if (!combinedStudents.has(cid)) combinedStudents.set(cid, { ethnicity: student.ethnicity ?? null })
-    else if (combinedStudents.get(cid).ethnicity == null && student.ethnicity != null) {
-      combinedStudents.get(cid).ethnicity = student.ethnicity
-    }
+    remember(acc[groupId], cid, student)
+    remember(combinedStudents, cid, student)
   }
 
   for (const e of enrollments) {
@@ -152,31 +179,28 @@ function buildReport(enrollments) {
   }
 
   // Sliding-scale/merit students dropped because their age couldn't be confirmed 4–18.
-  const slidingExcludedAge = [...slidingSeen].filter(cid => !acc.sliding.students.has(cid)).length
-
-  const groups = GROUPS.map(g => ({
-    ...g,
-    uniqueStudents: acc[g.id].students.size,
-    ethnicity:      ethnicityBreakdown(acc[g.id].students),
-  }))
+  const slidingExcludedAge = [...slidingSeen].filter(cid => !acc.sliding.has(cid)).length
 
   return {
-    groups,
+    groups: GROUPS.map(g => ({ ...g, ...breakdownsFor(acc[g.id]) })),
     slidingExcludedAge,
-    combined: {
-      uniqueStudents: combinedStudents.size,
-      ethnicity:      ethnicityBreakdown(combinedStudents),
-    },
+    combined: breakdownsFor(combinedStudents),
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Year-over-year comparison
 //
-// One "unit" per group plus Combined. Each unit becomes a table: a bold
-// unique-students row followed by one row per ethnicity category, with a column
-// per selected fiscal year. Categories are the union across the selected years,
-// so a category present in only one year still gets a row (0 elsewhere).
+// One "unit" per group plus Combined. Each unit becomes one table: a bold
+// unique-students row, then — per dimension — a section header carrying that
+// dimension's percentage base for each year, followed by a row per category,
+// with a column per selected fiscal year. Keeping all three dimensions in one
+// table keeps the year columns aligned and the Δ columns to a single set; the
+// per-year base on the section header is what stops a "100.0% Low" cell from
+// being read as 100% of the group.
+//
+// Category rows are the union across the selected years, so a category present
+// in only one year still gets a row (0 elsewhere).
 // ─────────────────────────────────────────────────────────────────────────────
 
 const TOTAL_ROW_LABEL = 'Unique students'
@@ -192,6 +216,25 @@ function unitsOf(fyReport) {
   ]
 }
 
+// Category labels for one dimension across all selected years: the dimension's
+// fixed order, or by descending total count with No Response last.
+function labelsFor(dim, perYear) {
+  if (dim.order) return dim.order
+  const totals = new Map()
+  for (const d of perYear) {
+    for (const [label, count] of Object.entries(d.counts)) {
+      totals.set(label, (totals.get(label) ?? 0) + count)
+    }
+  }
+  return [...totals.entries()]
+    .sort(([la, ca], [lb, cb]) => {
+      if (la === NO_RESPONSE) return 1
+      if (lb === NO_RESPONSE) return -1
+      return cb - ca || la.localeCompare(lb)
+    })
+    .map(([l]) => l)
+}
+
 // cols: [{ fy, report }] in chronological order.
 function buildComparison(cols) {
   if (cols.length === 0) return []
@@ -199,60 +242,76 @@ function buildComparison(cols) {
 
   return unitDefs.map((def, ui) => {
     // Per-year data for this unit.
-    const perYear = cols.map(c => unitsOf(c.report)[ui].data)
-
-    // Ethnicity categories: union across years, most common first (summed
-    // across years), No Response always last.
-    const totals = new Map()
-    for (const d of perYear) {
-      for (const b of d.ethnicity.buckets) totals.set(b.label, (totals.get(b.label) ?? 0) + b.count)
-    }
-    const labels = [...totals.entries()]
-      .sort(([la, ca], [lb, cb]) => {
-        if (la === NO_RESPONSE) return 1
-        if (lb === NO_RESPONSE) return -1
-        return cb - ca || la.localeCompare(lb)
-      })
-      .map(([l]) => l)
+    const perUnit = cols.map(c => unitsOf(c.report)[ui].data)
 
     const rows = [
       {
+        id:    'total',
         label: TOTAL_ROW_LABEL,
-        kind: 'total',
-        cells: perYear.map(d => ({ count: d.uniqueStudents, pct: null })),
+        kind:  'total',
+        dim:   '',
+        cells: perUnit.map(d => ({ count: d.uniqueStudents, pct: null })),
       },
-      ...labels.map(label => ({
-        label,
-        kind: 'ethnicity',
-        cells: perYear.map(d => {
-          const b = d.ethnicity.buckets.find(x => x.label === label)
-          const count = b?.count ?? 0
-          // A category absent from this year is 0% of that year's responders,
-          // not "no data". No Response never gets a percentage (it is excluded
-          // from the base), matching the Demographics report.
-          const pct = label === NO_RESPONSE || d.ethnicity.base === 0
-            ? null
-            : (count / d.ethnicity.base) * 100
-          return { count, pct }
-        }),
-      })),
     ]
+
+    for (const dim of DIMENSIONS) {
+      const perYear = perUnit.map(d => d.dims[dim.id])
+      rows.push({
+        id:    `${dim.id}:__base`,
+        label: dim.title,
+        note:  dim.baseNote,
+        kind:  'section',
+        dim:   dim.title,
+        cells: perYear.map(d => ({ count: d.base, pct: null })),
+      })
+      for (const label of labelsFor(dim, perYear)) {
+        rows.push({
+          id:    `${dim.id}:${label}`,
+          label,
+          kind:  'category',
+          dim:   dim.title,
+          cells: perYear.map(d => {
+            const count = d.counts[label] ?? 0
+            // A category absent from this year is 0% of that year's base, not
+            // "no data". Labels excluded from the base (No Response always,
+            // plus Decline to State for income) keep their count and get no
+            // percentage, matching the Demographics report.
+            return { count, pct: bucketPct(label, count, d.base, d.excluded) }
+          }),
+        })
+      }
+    }
 
     return { id: def.id, title: def.title, rows }
   })
 }
 
-// Change between two cells. Unique-students rows report a relative % change;
-// ethnicity rows report the shift in share in percentage points, since a
+// Change between two cells. The unique-students row reports a relative %
+// change; category rows report the shift in share in percentage points, since a
 // category can grow in headcount while shrinking as a share of the group.
+// Section (base) rows report the change in the base headcount only — a
+// percentage of a percentage base would mean nothing.
 function cellDelta(a, b, kind) {
   const count = b.count - a.count
   if (kind === 'total') {
     return { count, change: a.count === 0 ? null : (count / a.count) * 100, unit: '%' }
   }
+  if (kind === 'section') return { count, change: null, unit: '' }
   const change = a.pct === null || b.pct === null ? null : b.pct - a.pct
   return { count, change, unit: 'pp' }
 }
+
+// ─── end pure logic ──────────────────────────────────────────────────────────
+
+function esc(v) { return `"${String(v ?? '').replace(/"/g, '""')}"` }
+
+function triggerDownload(csv, filename) {
+  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }))
+  Object.assign(document.createElement('a'), { href: url, download: filename }).click()
+  URL.revokeObjectURL(url)
+}
+
+function today() { return new Date().toISOString().slice(0, 10) }
 
 function fmtCount(n) { return `${n > 0 ? '+' : ''}${n.toLocaleString()}` }
 
@@ -268,21 +327,24 @@ function deltaClass(raw) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// CSV export — tall format: one row per (group, category), a column pair per
-// fiscal year, and Δ pairs between consecutive years.
+// CSV export — tall format: one row per (group, dimension, category), a column
+// pair per fiscal year, and Δ pairs between consecutive years. A dimension's
+// percentage base gets its own row so the spreadsheet carries the denominator
+// the on-screen section header shows.
 // ─────────────────────────────────────────────────────────────────────────────
 
 function exportCSV(units, fys) {
-  const headers = ['Group', 'Category']
-  for (const fy of fys) headers.push(`${fy} Count`, `${fy} %`)
+  const headers = ['Group', 'Dimension', 'Category']
+  for (const fy of fys) headers.push(`${fy} Students`, `${fy} %`)
   for (let i = 0; i < fys.length - 1; i++) {
-    headers.push(`Δ ${fys[i]}→${fys[i + 1]} Count`, `Δ ${fys[i]}→${fys[i + 1]} % / pp`)
+    headers.push(`Δ ${fys[i]}→${fys[i + 1]} Students`, `Δ ${fys[i]}→${fys[i + 1]} % / pp`)
   }
 
   const rows = []
   for (const u of units) {
     for (const r of u.rows) {
-      const cells = [u.title, r.label]
+      const label = r.kind === 'section' ? `Percentage base (${r.note.replace('% of students who ', '')})` : r.label
+      const cells = [u.title, r.dim, label]
       for (const c of r.cells) cells.push(c.count, c.pct === null ? '' : c.pct.toFixed(1))
       for (let i = 0; i < r.cells.length - 1; i++) {
         const d = cellDelta(r.cells[i], r.cells[i + 1], r.kind)
@@ -338,33 +400,53 @@ function UnitCard({ unit, fys }) {
               </tr>
             </thead>
             <tbody>
-              {unit.rows.map(row => (
-                <tr key={row.label} className={row.kind === 'total' ? 'rt-row rt-top-row' : 'rt-row rt-sub-row'}>
-                  <td className="rt-label">{row.label}</td>
-                  {cols.map((col, ci) => {
-                    if (col.type === 'fy') {
-                      const c = row.cells[col.i]
+              {unit.rows.map(row => {
+                // Section rows carry the dimension's percentage base per year in
+                // the year columns; the Δ columns stay blank there.
+                if (row.kind === 'section') {
+                  return (
+                    <tr key={row.id} className="rt-section-hdr">
+                      <td>{row.label} — {row.note}</td>
+                      {cols.map((col, ci) =>
+                        col.type === 'fy' ? (
+                          <td key={ci} className="rt-period-cell liyp-base-cell">
+                            of {row.cells[col.i].count.toLocaleString()}
+                          </td>
+                        ) : (
+                          <td key={ci} />
+                        )
+                      )}
+                    </tr>
+                  )
+                }
+                return (
+                  <tr key={row.id} className={row.kind === 'total' ? 'rt-row rt-top-row' : 'rt-row rt-sub-row'}>
+                    <td className="rt-label">{row.label}</td>
+                    {cols.map((col, ci) => {
+                      if (col.type === 'fy') {
+                        const c = row.cells[col.i]
+                        return (
+                          <td key={ci} className="rt-period-cell">
+                            <div className="cell-enr">{c.count.toLocaleString()}</div>
+                            {row.kind !== 'total' && (
+                              <div className="cell-stu">{c.pct === null ? '—' : `${c.pct.toFixed(1)}%`}</div>
+                            )}
+                          </td>
+                        )
+                      }
+                      const d = cellDelta(row.cells[col.a], row.cells[col.b], row.kind)
                       return (
-                        <td key={ci} className="rt-period-cell">
-                          <div className="cell-enr">{c.count.toLocaleString()}</div>
-                          {row.kind !== 'total' && (
-                            <div className="cell-stu">{c.pct === null ? '—' : `${c.pct.toFixed(1)}%`}</div>
-                          )}
+                        <td key={ci} className="rt-delta-cell">
+                          <div className={`delta-line ${deltaClass(d.count)}`}>{fmtCount(d.count)}</div>
+                          <div className={`delta-line ${deltaClass(d.change ?? 0)}`}>
+                            {fmtChange(d.change, d.unit)}
+                          </div>
                         </td>
                       )
-                    }
-                    const d = cellDelta(row.cells[col.a], row.cells[col.b], row.kind)
-                    return (
-                      <td key={ci} className="rt-delta-cell">
-                        <div className={`delta-line ${deltaClass(d.count)}`}>{fmtCount(d.count)}</div>
-                        <div className={`delta-line ${deltaClass(d.change ?? 0)}`}>
-                          {fmtChange(d.change, d.unit)}
-                        </div>
-                      </td>
-                    )
-                  })}
-                </tr>
-              ))}
+                    })}
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>
@@ -385,6 +467,12 @@ export default function LowIncomeYouthProgram() {
   const [error, setError]                   = useState(null)
   const [selectedFYs, setSelectedFYs]       = useState([])
   const [infoOpen, setInfoOpen]             = useState(false)
+
+  // Only the newest demographic fetch may commit its result. Clicking FY pills
+  // in quick succession starts overlapping fetches, and the earlier (smaller,
+  // but not necessarily faster) one could resolve last and overwrite the newer
+  // one — the just-added year then rendered as 0 students in a grant report.
+  const loadSeq = useRef(0)
 
   useEffect(() => { loadPeriods() }, [])
 
@@ -419,11 +507,18 @@ export default function LowIncomeYouthProgram() {
   const fyKey = orderedFYs.join('|')
 
   useEffect(() => {
-    if (orderedFYs.length === 0) { setEnrollments([]); setError(null); return }
+    // Clearing the selection also supersedes any fetch still in flight, so it
+    // can't repopulate the tables after the user emptied them.
+    if (orderedFYs.length === 0) {
+      loadSeq.current++
+      setEnrollments([]); setError(null); setLoading(false)
+      return
+    }
     loadData(orderedFYs)
   }, [fyKey])
 
   async function loadData(fys) {
+    const seq = ++loadSeq.current
     setLoading(true)
     setError(null)
     const PAGE = 1000
@@ -434,15 +529,17 @@ export default function LowIncomeYouthProgram() {
         .select(`
           customer_id, fiscal_year, discount_type,
           events(course_name, class_start_date),
-          students(birthdate, ethnicity)
+          students(birthdate, ethnicity, gender, household_income)
         `)
         .in('fiscal_year', fys)
         .range(from, from + PAGE - 1)
+      if (seq !== loadSeq.current) return          // superseded mid-fetch
       if (error) { setError(error.message); setLoading(false); return }
       all = all.concat(data)
       if (data.length < PAGE) break
       from += PAGE
     }
+    if (seq !== loadSeq.current) return
     setEnrollments(all)
     setLoading(false)
   }
@@ -480,10 +577,12 @@ export default function LowIncomeYouthProgram() {
             <div className="ugcb-info-section-title">What this report shows</div>
             <p>
               Grant reporting on four low-income youth cohorts. Pick one or more fiscal years; each
-              cohort gets a table of <strong>unique students</strong> and their <strong>ethnicity</strong>{' '}
-              breakdown, followed by a <strong>Combined</strong> table that de-duplicates students
-              across all four cohorts (a student in two cohorts is counted once in Combined). Every
-              enrollment in the database qualifies — only ENROLLED and PEND statuses are imported.
+              cohort gets a table of <strong>unique students</strong> broken down by{' '}
+              <strong>household income</strong>, <strong>ethnicity</strong> and{' '}
+              <strong>gender</strong>, followed by a <strong>Combined</strong> table that
+              de-duplicates students across all four cohorts (a student in two cohorts is counted
+              once in Combined). Every enrollment in the database qualifies — only ENROLLED and PEND
+              statuses are imported.
             </p>
             <div className="ugcb-info-section-title">Groups</div>
             <p>
@@ -502,18 +601,44 @@ export default function LowIncomeYouthProgram() {
               <li><strong>Children's Chorus</strong> and <strong>Teen Jazz Orchestra</strong> —
                 students enrolled in the class of that name.</li>
             </ul>
-            <div className="ugcb-info-section-title">Ethnicity</div>
+            <div className="ugcb-info-section-title">The three breakdowns</div>
             <p>
-              Categories match the Demographics report (Hispanic and Latinx merged to Hispanic/Latinx),
-              and each student's ethnicity is the single value coalesced from ASAP's three ethnicity
-              columns on upload. Percentages are out of students who gave a response for that year;
-              "No Response" is counted and shown but excluded from the percentage base, so the
-              remaining categories sum to 100%.
+              Categories and percentage bases match the Demographics report exactly — they come from
+              one shared definitions file, so a relabelling in ASAP is absorbed in one place and this
+              report cannot drift from Demographics. Each student's ethnicity is the single value
+              coalesced from ASAP's three ethnicity columns on upload; Hispanic and Latinx are merged
+              to Hispanic/Latinx, and the trans gender labels merge to Transgender.
+            </p>
+            <p>
+              <strong>Each dimension has its own percentage base</strong>, shown on that dimension's
+              header row as "of <em>N</em>" for every year. Ethnicity and gender percentages are out
+              of the students who <strong>responded</strong> ("No Response" is counted and shown but
+              excluded from the base). Household income percentages are out of the students who{' '}
+              <strong>named a bracket</strong> — both "No Response" <em>and</em> "Decline to State"
+              are excluded there, so a rising number of decliners can't drag the low-income share
+              down. Excluded categories keep their count and show "—" instead of a percentage, and
+              the categories that do get a percentage sum to 100% of that base.
+            </p>
+            <p>
+              <strong>Read income against its base.</strong> The base is narrow in these cohorts and
+              varies a lot by group — in FY26 it was 110 of 220 Sliding-Scale students but only 9 of
+              34 Children's Chorus students. A "100.0% Low" cell means 100% of the students who named
+              a bracket, not 100% of the group. Note too that the Sliding-Scale figure is close to
+              circular: qualifying for a sliding-scale or Merit discount is itself an income test, so
+              that group reports 100.0% Low in every year on file. YMP is the group with real
+              variation (97.6% → 93.9% → 91.3% → 88.9% across FY23–FY26).
+            </p>
+            <p>
+              <strong>Gender is thinly answered in these cohorts</strong> — far more thinly than
+              ethnicity. In FY26, 135 of 220 Sliding-Scale students and 196 of 354 Combined students
+              are "No Response", so the gender percentages speak for a minority of each group. Read
+              them next to the No Response row.
             </p>
             <p>
               Category rows are the union across the selected years — a category present in only one
-              year still gets a row, showing 0 in the others. Rows are ordered by total students across
-              the selected years, with "No Response" last.
+              year still gets a row, showing 0 in the others. Income rows stay in fixed logical
+              order; ethnicity and gender rows are ordered by total students across the selected
+              years, with "No Response" last.
             </p>
             <div className="ugcb-info-section-title">Comparing years</div>
             <p>
@@ -526,21 +651,23 @@ export default function LowIncomeYouthProgram() {
             <p>
               In a Δ column the top line is the change in students and the bottom line is the change in
               share: a percent change for the <em>Unique students</em> row, and{' '}
-              <strong>percentage points (pp)</strong> for ethnicity rows, since a category can grow in
-              headcount while shrinking as a share of the group. "No Response" has no share, so its
-              second line shows "—".
+              <strong>percentage points (pp)</strong> for category rows, since a category can grow in
+              headcount while shrinking as a share of the group. Categories excluded from a base have
+              no share, so their second line shows "—". Dimension header rows show only the change in
+              the base headcount.
             </p>
             <p>
               <strong>Reading pp shifts:</strong> the No Response count has fallen steadily year over
               year as demographic collection improved. Because percentages are taken out of the
               responding students only, part of any share movement reflects a larger response base
-              rather than a changed student mix — check the No Response row before attributing a pp
-              shift to a real demographic change.
+              rather than a changed student mix — check the base on the dimension header and the
+              No Response row before attributing a pp shift to a real demographic change.
             </p>
             <div className="ugcb-info-section-title">Export</div>
             <p>
               <strong>Export CSV</strong> produces one file covering every group plus Combined: a row
-              per group and category, a count and % column for each selected year, then Δ count and
+              per group, dimension and category — including a row carrying each dimension's
+              percentage base — with a count and % column for each selected year, then Δ count and
               Δ "% / pp" columns between consecutive years.
             </p>
           </div>

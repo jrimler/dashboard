@@ -1044,6 +1044,16 @@
 .liyp-group-card .pig-roster-header { margin-top: 0; }
 .liyp-group-card .demo-dims { margin-top: 4px; }
 
+/* Per-year percentage base shown in a dimension's section header row. Reads as
+   a denominator, not a count, so it drops the section header's uppercase. */
+.liyp-base-cell {
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 600;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
 /* ── Demographics scope tabs (Total / Lessons / Group Classes) ── */
 .demo-scope-tabs {
   display: flex;
