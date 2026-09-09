@@ -19,6 +19,7 @@ import { sb } from './db.mjs'
 // Imported directly rather than read back off the report, so the check confirms
 // the narrative agrees with the shared rules instead of merely with itself.
 import { familyOf } from '../src/reports/discountFamilies.js'
+import { quarterSortKey } from '../src/utils/periodUtils.js'
 
 const root       = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const reportPath = join(root, 'src/reports/EnrollmentNarrative.jsx')
@@ -127,17 +128,16 @@ console.log(`  ${quarters.length} quarters × 7 metrics recounted`)
 console.log('\n── Every figure in the generated prose traces to a real number ──')
 const medians = R.seasonMedians(totals)
 const statsByPeriod = Object.fromEntries(Object.entries(byPeriod).map(([p, r]) => [p, R.buildQuarterStats(r)]))
-const ordered = [...quarters].sort()
+// Calendar order, using the app's own key — an alphabetical sort happens to
+// agree within one season but not across them.
+const ordered = [...quarters].sort((a, b) => quarterSortKey(a) - quarterSortKey(b))
 let scanned = 0, quoted = 0
 
-function priorYear(period) {
-  const m = period.match(/^(\w+) Quarter (\d{4})$/)
-  return m ? `${m[1]} Quarter ${+m[2] - 1}` : null
-}
-
 for (const q of ordered) {
-  const yoyP = priorYear(q)
-  const seqP = ordered[ordered.indexOf(q) - 1]
+  // The report derives both comparisons itself; the check uses that same
+  // function rather than a copy, so the two cannot disagree about what a
+  // summary was measured against.
+  const { yoy: yoyP, seq: seqP } = R.comparisonsFor(q, quarters)
   const unit = p => p && byPeriod[p] ? { period: p, rows: byPeriod[p], stats: R.buildQuarterStats(byPeriod[p]) } : null
   const focus = unit(q)
   const yoy   = unit(yoyP)
@@ -304,7 +304,31 @@ console.log('\n── Suppression rules ──')
 }
 console.log('  small-base percentages suppressed; unchanged quarters read as unchanged')
 
-// ─── 5. seasonal caveat fires only across differently sized seasons ─────────
+// ─── 5. the comparison pair is the standard one, every quarter ──────────────
+// Both comparisons are fixed rather than chosen, so every summary has the same
+// shape. That only holds if the derivation is right for all 18 quarters.
+console.log('\n── Comparison quarters are the standard pair ──')
+for (const q of ordered) {
+  const { yoy, seq } = R.comparisonsFor(q, quarters)
+  const m = q.match(/^(\w+) Quarter (\d{4})$/)
+  const expectedYoy = `${m[1]} Quarter ${+m[2] - 1}`
+  check(yoy === (quarters.includes(expectedYoy) ? expectedYoy : null),
+    `${q}: year-over-year comparison is ${yoy}, expected ${expectedYoy}`)
+  const earlier = ordered.filter(p => quarterSortKey(p) < quarterSortKey(q))
+  check(seq === (earlier.at(-1) ?? null),
+    `${q}: previous-quarter comparison is ${seq}, expected ${earlier.at(-1) ?? 'none'}`)
+}
+{
+  const fall = R.comparisonsFor('Fall Quarter 2026', quarters)
+  check(fall.yoy === 'Fall Quarter 2025' && fall.seq === 'Summer Quarter 2026',
+    `Fall Quarter 2026 pairs with ${fall.yoy} / ${fall.seq}`)
+  const earliest = R.comparisonsFor(ordered[0], quarters)
+  check(earliest.seq === null, 'the earliest quarter on file was given a previous quarter')
+  console.log(`  Fall Quarter 2026 -> ${fall.yoy} (year over year) · ${fall.seq} (previous quarter)`)
+  console.log(`  ${ordered.length} quarters, each pairing verified`)
+}
+
+// ─── 6. seasonal caveat fires only across differently sized seasons ─────────
 console.log('\n── Seasonal caveat ──')
 {
   const sameSeason = R.seasonalCaveat('Fall Quarter 2026', 'Fall Quarter 2025', medians)

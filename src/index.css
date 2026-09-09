@@ -1440,3 +1440,10 @@
   margin: 0;
   line-height: 1.65;
 }
+
+.narr-compared {
+  margin: 0;
+  padding: 7px 0;
+  font-size: 0.95rem;
+  line-height: 1.4;
+}

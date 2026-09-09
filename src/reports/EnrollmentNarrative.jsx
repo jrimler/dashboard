@@ -154,6 +154,32 @@ export function seasonalCaveat(periodA, periodB, medians) {
          `so most of that difference is the shape of the calendar rather than a change in demand.`
 }
 
+// ─── which quarters a summary compares ──────────────────────────────────────
+
+// Both comparisons are derived from the chosen quarter rather than picked by
+// hand: the same quarter one fiscal year earlier, and the quarter immediately
+// before it on the calendar. Fixing them keeps every summary the same shape, so
+// two quarters' summaries can be read side by side without first checking what
+// each was measured against.
+//
+// The sequential comparison deliberately includes summer→fall. Summer terms are
+// genuinely shorter, so that pairing is flagged by seasonalCaveat() rather than
+// avoided — a labelled comparison is more useful than a missing one.
+export function comparisonsFor(focusPeriod, availableQuarters) {
+  const q = parseQuarter(focusPeriod)
+  if (!q) return { yoy: null, seq: null }
+
+  const yoyLabel = `${q.season} Quarter ${q.year - 1}`
+  const yoy = availableQuarters.includes(yoyLabel) ? yoyLabel : null
+
+  const focusKey = quarterSortKey(focusPeriod)
+  const seq = availableQuarters
+    .filter(p => quarterSortKey(p) < focusKey)
+    .sort((a, b) => quarterSortKey(b) - quarterSortKey(a))[0] ?? null
+
+  return { yoy, seq }
+}
+
 // ─── same-season trend ──────────────────────────────────────────────────────
 
 // A branch compared against itself over time. Only quarters of the SAME season
@@ -430,18 +456,10 @@ export function toPlainText(period, paragraphs) {
 // Component
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Same quarter one fiscal year earlier ("Fall Quarter 2026" → "Fall Quarter 2025").
-function priorYearOf(period) {
-  const q = parseQuarter(period)
-  return q ? `${q.season} Quarter ${q.year - 1}` : null
-}
-
 export default function EnrollmentNarrative() {
   const [quarters, setQuarters]   = useState([])   // every quarter on file, newest first
   const [totals, setTotals]       = useState({})   // period → enrollment count, for season medians
   const [focus, setFocus]         = useState('')
-  const [yoyPeriod, setYoyPeriod] = useState('')
-  const [seqPeriod, setSeqPeriod] = useState('')
   const [rowsByPeriod, setRows]   = useState(null)
   const [loading, setLoading]     = useState(true)
   const [busy, setBusy]           = useState(false)
@@ -465,13 +483,7 @@ export default function EnrollmentNarrative() {
         const qs = Object.keys(counts).sort((a, b) => quarterSortKey(b) - quarterSortKey(a))
         setTotals(counts)
         setQuarters(qs)
-        // Defaults: newest quarter, the same quarter a year earlier, and the
-        // quarter immediately before it.
-        const f = qs[0] ?? ''
-        setFocus(f)
-        const py = priorYearOf(f)
-        setYoyPeriod(py && qs.includes(py) ? py : '')
-        setSeqPeriod(qs[1] ?? '')
+        setFocus(qs[0] ?? '')
       } catch (e) {
         if (!cancelled) setError(e.message)
       } finally {
@@ -480,6 +492,12 @@ export default function EnrollmentNarrative() {
     })()
     return () => { cancelled = true }
   }, [])
+
+  // Both comparisons follow from the chosen quarter — see comparisonsFor().
+  const { yoy: yoyPeriod, seq: seqPeriod } = useMemo(
+    () => comparisonsFor(focus, quarters),
+    [focus, quarters]
+  )
 
   // Phase 2: full detail for just the selected quarters.
   useEffect(() => {
@@ -602,19 +620,26 @@ export default function EnrollmentNarrative() {
               steady rather than given a direction.
             </p>
 
-            <div className="ugcb-info-section-title">Choosing the comparison quarters</div>
+            <div className="ugcb-info-section-title">The comparison quarters are fixed</div>
             <p>
-              By default the report compares the selected quarter against the same quarter one
-              fiscal year earlier, and against the quarter immediately before it. Both are free to
-              change, and either can be set to <em>None</em>.
+              You choose one quarter; the two comparisons follow from it automatically — the{' '}
+              <strong>same quarter one fiscal year earlier</strong> (Fall 2026 against Fall 2025) and
+              the <strong>quarter immediately before it</strong> (Fall 2026 against Summer 2026).
+              They are not selectable on purpose: every summary then has the same shape, so two
+              quarters' summaries can be read side by side without first checking what each was
+              measured against. Both are named above the text.
             </p>
             <p>
-              Summer terms are genuinely shorter than the other three, so a summer-to-fall
-              comparison largely measures the calendar. Rather than forbidding that pairing, the
-              report measures the typical size of each season across every quarter on file and adds
-              a caveat sentence when the two seasons differ in scale by more than{' '}
-              {Math.round(SEASON_SCALE_TOLERANCE * 100)}%. The comparison is still shown — it is just
-              labelled for what it is.
+              That means summer-to-fall comparisons do happen, and summer terms are genuinely
+              shorter than the other three — so that pairing largely measures the calendar. Rather
+              than dropping it, the report measures the typical size of each season across every
+              quarter on file and adds a caveat sentence whenever two seasons differ in scale by
+              more than {Math.round(SEASON_SCALE_TOLERANCE * 100)}%. The comparison is still shown,
+              just labelled for what it is.
+            </p>
+            <p>
+              A quarter with no earlier fiscal year on file simply has no year-over-year paragraph
+              rather than a misleading one.
             </p>
 
             <div className="ugcb-info-section-title">Branches over time</div>
@@ -666,20 +691,20 @@ export default function EnrollmentNarrative() {
             {quarters.map(q => <option key={q} value={q}>{q}</option>)}
           </select>
         </label>
-        <label className="narr-field">
-          <span className="narr-field-label">Compared with (year over year)</span>
-          <select value={yoyPeriod} onChange={e => setYoyPeriod(e.target.value)}>
-            <option value="">None</option>
-            {quarters.filter(q => q !== focus).map(q => <option key={q} value={q}>{q}</option>)}
-          </select>
-        </label>
-        <label className="narr-field">
-          <span className="narr-field-label">And with</span>
-          <select value={seqPeriod} onChange={e => setSeqPeriod(e.target.value)}>
-            <option value="">None</option>
-            {quarters.filter(q => q !== focus).map(q => <option key={q} value={q}>{q}</option>)}
-          </select>
-        </label>
+        {/* The comparisons are fixed, not chosen — shown so it is never a
+            question what a given summary was measured against. */}
+        <div className="narr-field">
+          <span className="narr-field-label">Compared against</span>
+          <p className="narr-compared">
+            {yoyPeriod
+              ? <><strong>{yoyPeriod}</strong> (same quarter, previous fiscal year)</>
+              : <em>no earlier fiscal year on file</em>}
+            {' · '}
+            {seqPeriod
+              ? <><strong>{seqPeriod}</strong> (previous quarter)</>
+              : <em>no earlier quarter on file</em>}
+          </p>
+        </div>
       </div>
 
       {busy && <p className="coming-soon">Reading those quarters…</p>}
