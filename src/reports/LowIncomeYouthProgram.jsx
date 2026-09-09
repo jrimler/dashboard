@@ -607,7 +607,8 @@ export default function LowIncomeYouthProgram() {
               one shared definitions file, so a relabelling in ASAP is absorbed in one place and this
               report cannot drift from Demographics. Each student's ethnicity is the single value
               coalesced from ASAP's three ethnicity columns on upload; Hispanic and Latinx are merged
-              to Hispanic/Latinx, and the trans gender labels merge to Transgender.
+              to Hispanic/Latinx, the Pacific Islander spellings merge to Native Hawaiian or Other
+              Pacific Islander, and the trans gender labels merge to Transgender.
             </p>
             <p>
               <strong>Each dimension has its own percentage base</strong>, shown on that dimension's

@@ -221,12 +221,14 @@ scripts/                     Local analysis tooling (Node, service_role key) —
   enrollment-trends-check.mjs  Verifies Enrollment Trends the same way — extracts its pure-logic block and reconciles every quarter bucket against live data
   sliding-trend.mjs          Ad-hoc: sliding-scale (Child* discount) enrollment trend over time
   teen-jazz-list.mjs         Ad-hoc: lists the unique Teen Jazz Orchestra students LIYP counts for a fiscal year, to reconcile the count by hand (prints names — keep output local)
+  quarter-audit.mjs          Pre-report sanity check for ONE uploaded quarter — run it after every upload (see After an upload below)
   screenshot.mjs             Headless-browser visual check: starts the dev server, logs in, asserts the page rendered, writes screenshots/ (see Seeing the app below)
 supabase/
   migrations/
     001_initial_schema.sql   students, events, enrollments tables + indexes
     002_class_schedule.sql   class_schedule table + index (FK → events)
     003_grant_delete_enrollments.sql   DELETE grant for replace-by-quarter uploads
+    004_upload_log.sql       upload_log table + index + grants (records when each upload happened)
 CLAUDE.md                    Working agreement: ship-every-change workflow, verification rules, ASAP gotchas
 netlify.toml                 SPA redirect (/* → /index.html)
 .env.example                 Env var template
@@ -381,7 +383,7 @@ Counts unique students enrolled in any piano or keyboard lesson or group class f
 - `age_group`: see below
 - `tuition_free_status`: see below
 
-**Category:** Hardcoded override map keyed on course name (`CATEGORY_MAP` at the top of `UniqueGroupClassesBoard.jsx`). Falls back to the ASAP `department` field if no override exists.
+**Category:** Hardcoded override map keyed on course name (`CATEGORY_MAP` at the top of `UniqueGroupClassesBoard.jsx`). Falls back to the ASAP `department` field if no override exists, passed through `DEPARTMENT_ALIASES` so a department that is another spelling of an existing category folds into it — ASAP has filed string sections under `"Violin"` as well as `"Strings"`, and unmerged those became their own single-section category row.
 
 **Tuition-free:** All enrollments across all matching events are tuition-free (`is_tuition_free = true`), OR the course name starts with `"Young Musicians Program"` (hardcoded override).
 
@@ -409,7 +411,7 @@ Summarizes age, gender, ethnicity, and household income for **unique students** 
 
 **Age brackets** (computed from `birthdate` against the enrollment's event `class_start_date`; earliest `class_start_date` within the unit): `0–2`, `3–35`, `36–54`, `55–74`, `75+`, and `No Response` (no birthdate, or birthdate before 1905).
 
-**Gender / Ethnicity:** raw stored value as the category label; blank/null → `No Response`. Each student has one ethnicity (coalesced from the three source columns in priority order). Case-insensitive alias merges collapse related labels into one category: **ethnicity** — `"Hispanic"` and `"Latinx"` → `"Hispanic/Latinx"` (`ETHNICITY_ALIASES`); **gender** — `"Trans Male"`, `"Trans Female"`, `"Transgender"` → `"Transgender"`; `"Nonbinary/Gender Nonconforming/Genderqueer"` and `"Gender Non-Conforming"` → `"Nonbinary/Gender Nonconforming/Genderqueer"`; plus case normalization for `"Decline to State"` and `"Two Spirit"` (`GENDER_ALIASES`).
+**Gender / Ethnicity:** raw stored value as the category label; blank/null → `No Response`. Each student has one ethnicity (coalesced from the three source columns in priority order). Case-insensitive alias merges collapse related labels into one category: **ethnicity** — `"Hispanic"` and `"Latinx"` → `"Hispanic/Latinx"`, and `"Pacific Islander"` / `"Native Hawaiian"` / `"Native Hawaiian or Other Pacific Islander"` → `"Native Hawaiian or Other Pacific Islander"` (`ETHNICITY_ALIASES`); **gender** — `"Trans Male"`, `"Trans Female"`, `"Transgender"` → `"Transgender"`; `"Nonbinary/Gender Nonconforming/Genderqueer"` and `"Gender Non-Conforming"` → `"Nonbinary/Gender Nonconforming/Genderqueer"`; plus case normalization for `"Decline to State"` and `"Two Spirit"` (`GENDER_ALIASES`).
 
 **Household income:** mapped via an explicit case-insensitive lookup table (`INCOME_MAP`), not numeric parsing. `High`: Above $154,700. `Low`: Below $60,600 / Below $58,000 / Below $60,000 / $96,700–$116,040 / $97,000–$145,200 / $58,000–$96,700 / $60,600–$97,000 / $60,001–$69,000 / $69,001–$78,000 / $78,001–$86,000 / $86,001–$93,000 / Above $93,001 / $116,040–$154,700 / Above $145,201. (The three top brackets other than Above $154,700 landing in `Low` reflects SF's very high area median income — HUD's low-income limit for a larger San Francisco household runs above $145k. An earlier version of this document listed Above $145,201 and $116,040–$154,700 as `High`, which never matched the shipped map.) `Decline to State`: Decline to state. `No Response`: blank, `0`, **and any value not in the map** (so a new ASAP income label lands in No Response rather than vanishing — map must be updated when ASAP adds brackets; ASAP's bracket labels have changed several times across years).
 
@@ -593,6 +595,21 @@ A chart can be logically correct and still render nothing. The first version of 
 - every `<svg>` actually contains marks (paths / lines / labels)
 
 For the trends report it also captures the Branch, Lessons-vs-classes, and summers-excluded states. Credentials come from the gitignored `.env` (`E2E_EMAIL`, `E2E_PASSWORD`) and never from the command line.
+
+---
+
+## After an upload (`scripts/quarter-audit.mjs`)
+
+Run `node scripts/quarter-audit.mjs` after every upload, before reporting off the new data.
+
+The reports classify by pattern — discount-code families, course names, ASAP's demographic labels — and **ASAP relabels things constantly**. A renamed code or course does not raise an error: it lands quietly in an "unmatched" bucket, or, for an income bracket, in "No Response". This script surfaces exactly those cases for one quarter. Like the other check scripts it **extracts the report files' own rules verbatim** rather than reimplementing them, so a rule change can't leave the audit behind.
+
+With no argument it audits the most recently starting quarter; pass a period name (`node scripts/quarter-audit.mjs "Winter Quarter 2026"`) to audit another. It exits non-zero when something needs attention, and splits findings into two levels:
+
+- **NEEDS ATTENTION** — a rule actually failed: an unmatched discount code, an income bracket missing from `INCOME_MAP`, a YMP-looking course missing from LIYP's exact-match set, an orphaned or duplicated row, `is_tuition_free` disagreeing with `(amount - discount) <= 15`, or an implausible `class_start_date` (ASAP's far-future placeholder, which silently ages a youth into the adult bucket because both the Board report and LIYP compute age *at the class start date*).
+- **note** — a judgement call for a human: discount codes and courses appearing for the first time, ethnicity/gender values never seen before (each becomes its own row unless aliased), blank departments, and whether the quarter looks complete.
+
+The completeness check compares against the same quarter one year earlier: if last year's term had sections starting later than anything in this one, the quarter is probably still filling and a later re-upload will true it up.
 
 ---
 

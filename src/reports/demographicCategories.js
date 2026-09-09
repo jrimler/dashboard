@@ -74,6 +74,15 @@ export function bucketPct(label, count, base, excluded) {
 export const ETHNICITY_ALIASES = {
   'hispanic': 'Hispanic/Latinx',
   'latinx':   'Hispanic/Latinx',
+
+  // ASAP has written the Pacific Islander group three different ways over the
+  // years ("Native Hawaiian or Other Pacific Islander", "Pacific Islander",
+  // "Native Hawaiian"). Left unmerged they split one already-small group across
+  // separate rows — FY27 read 4 and 2 instead of a single 6 — which understates
+  // the group in any grant report that quotes one row.
+  'pacific islander':                          'Native Hawaiian or Other Pacific Islander',
+  'native hawaiian':                           'Native Hawaiian or Other Pacific Islander',
+  'native hawaiian or other pacific islander': 'Native Hawaiian or Other Pacific Islander',
 }
 
 // Gender labels merged into shared categories, matched case-insensitively

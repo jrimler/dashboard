@@ -440,8 +440,9 @@ export default function NeighborhoodChoirDemographics() {
               Ethnicity, gender, and income categories are the same ones the{' '}
               <strong>Demographics</strong> report uses — the definitions are shared in code, so the
               two reports cannot drift apart. Ethnicity is the single value coalesced from ASAP's
-              three ethnicity columns on upload, with Hispanic and Latinx merged to Hispanic/Latinx;
-              gender merges the trans and gender-nonconforming variants each into one category.
+              three ethnicity columns on upload, with Hispanic and Latinx merged to Hispanic/Latinx and the
+              Pacific Islander spellings merged to Native Hawaiian or Other Pacific Islander; gender
+              merges the trans and gender-nonconforming variants each into one category.
             </p>
             <p>
               <strong>Household income</strong> maps ASAP's bracket labels to High, Low, or Decline to

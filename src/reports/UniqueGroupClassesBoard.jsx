@@ -40,6 +40,22 @@ const CATEGORY_MAP = {
   'Young Musicians Program / Saturday Play! (Theory)':   'Young Musicians Program',
 }
 
+// ASAP department values that name an existing category under a different
+// name. Unmerged, one stray spelling becomes its own single-section row on the
+// board table — FY27 filed two Suzuki string sections under "Violin" while
+// every other string section said "Strings". Keyed lowercase, matched against
+// the trimmed department.
+const DEPARTMENT_ALIASES = {
+  'violin': 'Strings',
+}
+
+// Category from the ASAP department, with alias spellings folded in. Used only
+// when CATEGORY_MAP has no override for the course name.
+function departmentCategory(department) {
+  const d = (department ?? '').trim()
+  return DEPARTMENT_ALIASES[d.toLowerCase()] ?? d
+}
+
 // Any course whose name starts with this prefix is unconditionally tuition-free.
 const YMP_PREFIX = 'Young Musicians Program'
 
@@ -162,8 +178,9 @@ function buildGroups(eventsData, scheduleByEventId, enrollmentsData) {
   }
 
   return Object.values(groups).map(g => {
-    // Category: hardcoded override map first, then ASAP department (both trimmed)
-    const category = (CATEGORY_MAP[g.courseName] ?? (g.department ?? '')).trim() || '—'
+    // Category: hardcoded override map first, then the ASAP department with
+    // alias spellings folded in (both trimmed)
+    const category = (CATEGORY_MAP[g.courseName] ?? departmentCategory(g.department)).trim() || '—'
 
     // Tuition-free: YMP prefix override OR every enrollment is free
     const isYMP    = g.courseName.startsWith(YMP_PREFIX)
@@ -482,7 +499,8 @@ export default function UniqueGroupClassesBoard() {
             <p>
               The Category column may differ from ASAP's Department field. A hardcoded override map assigns
               display categories to specific course names. If no override exists, the ASAP department value
-              is used. The map is defined at the top of{' '}
+              is used, with alias spellings folded into the category they belong to (ASAP has filed
+              string sections under <em>"Violin"</em> as well as <em>"Strings"</em>). The map is defined at the top of{' '}
               <code>src/reports/UniqueGroupClassesBoard.jsx</code> and is easy to update.
             </p>
           </div>

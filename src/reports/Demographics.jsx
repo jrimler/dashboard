@@ -583,7 +583,8 @@ export default function Demographics() {
           counted and bucketed into 0–2, 3–35, 36–54, 55–74, and 75+. A missing birthdate — or a
           placeholder one before 1905, which ASAP writes as 1900-01-01 — counts as No Response.{' '}
           <strong>Ethnicity</strong> and <strong>gender</strong> use the stored value as the category
-          label, with related labels merged (Hispanic and Latinx to Hispanic/Latinx; the trans and
+          label, with related labels merged (Hispanic and Latinx to Hispanic/Latinx; Pacific Islander
+          and Native Hawaiian to Native Hawaiian or Other Pacific Islander; the trans and
           gender-nonconforming variants each to one category). <strong>Household income</strong> is
           mapped from ASAP's bracket labels to High, Low, or Decline to State through an explicit
           lookup table; ASAP has changed those labels several times, so any bracket not yet in the
