@@ -427,6 +427,8 @@ Summarizes age, gender, ethnicity, and household income for **unique students** 
 
 Excluding `Decline to State` from income was a deliberate change (July 2026, at the user's request) and it moves the numbers a lot, because declining income is common and rising: all students FY26 low-income share went 62.4% → **92.1%**, FY23 65.6% → 99.5%. The narrower base means an income percentage speaks for fewer students than a gender or ethnicity one — read it next to the `Decline to State` and `No Response` counts. Helpers `pctBase(counts, total, excluded)` and `bucketPct(label, count, base, excluded)` are shared, so the two exclusion rules cannot diverge between reports.
 
+**Discount families** live in **`src/reports/discountFamilies.js`** for the same reason: Discount Trends reports them and Enrollment Narrative describes how they moved, and a report that disagreed about what counts as "Sliding Scale — Youth" would be a bug. `scripts/quarter-audit.mjs` imports the module rather than slicing the rules out of a report file, so there is one definition and one fewer anchor that can drift.
+
 **Where these categories live:** the income map, income order, both exclusion lists, and both alias maps are in **`src/reports/demographicCategories.js`**, shared by Demographics, LIYP, and Neighborhood Choir Program Demographics. A grant report that disagreed with Demographics about what counts as "Low" income, or about how Hispanic/Latinx is grouped, would be a bug — so ASAP's periodic relabelling is absorbed in exactly one file. (These definitions previously lived in `Demographics.jsx` and were copied into LIYP.)
 
 **UI:** Scope tabs (`Total · Lessons · Group Classes`, each showing its unique-student count) select which aggregate breakdown displays (count + % per bucket across the four dimensions). In the Group Classes view, a sortable class table with the Classes-page drilldown pattern appears below — click a class to expand its four-dimension breakdown. Percentages are relative to that dimension's base (excluded categories show `—` for their percentage: `No Response` everywhere, plus `Decline to State` under income); age and income buckets stay in fixed logical order, gender/ethnicity by descending count with `No Response` last.
@@ -452,11 +454,15 @@ The same figures the **Enrollment** page reports as a table, written out as pros
 
 **Seasonal caveat:** summer terms are genuinely shorter, so a summer-to-fall comparison largely measures the calendar. Rather than forbidding that pairing, the report measures each season's median quarter total across every quarter on file and appends a caveat sentence when two seasons differ in scale by more than 15% (summer runs ~51% the size of fall). The comparison is still shown, just labelled for what it is.
 
+**Branches over time:** each branch also gets its own paragraph, measured against *itself* rather than against the other. The trend line uses only quarters of the **same season** — comparing Mission's fall against its own summer would measure the calendar, the same trap the seasonal caveat exists to flag — and needs at least three same-season quarters before it states a trend. It reports the net movement and whether the direction was consistent, and never extrapolates forward. Each branch is also broken down internally (lessons, group classes, tuition-free), so the report can say a branch changed *shape* even when its total barely moved.
+
+**Discounts:** codes are collapsed into program families by the same rules Discount Trends uses — shared in `src/reports/discountFamilies.js` — and the paragraph reports the discounted share, the largest families, and the biggest year-over-year movements. A code matching no family lands in `Unmatched`; when any appear, the paragraph says so and points at Discount Trends rather than letting a family deflate silently.
+
 **Completeness caveat:** when the comparison quarter ran sections that started later in the term than anything in the selected one, the report says so and recommends re-uploading — the same check `scripts/quarter-audit.mjs` performs.
 
 **Copy as text** puts the whole summary on the clipboard as plain text for pasting into a memo or email.
 
-Verified by `scripts/enrollment-narrative-check.mjs`, which pulls every figure back out of the generated sentences and reconciles it against an independent count — 595 figures across all 18 quarters. A wrong number is easier to miss in prose than in a table, because a sentence reads as authoritative whatever it says.
+Verified by `scripts/enrollment-narrative-check.mjs`, which pulls every figure back out of the generated sentences and reconciles it against an independent count — 1,174 figures across all 18 quarters, including the branch trend series and the discount family counts, each recomputed from the raw rows rather than read back from the report. A wrong number is easier to miss in prose than in a table, because a sentence reads as authoritative whatever it says.
 
 ---
 

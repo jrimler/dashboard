@@ -31,17 +31,12 @@ function slice(text, startRe, endRe, what) {
   return rest.slice(0, e + rest.match(endRe)[0].length)
 }
 
-const dt    = src('DiscountTrends.jsx')
 const piano = src('PianoInspiresGrant.jsx')
 const choir = src('NeighborhoodChoirDemographics.jsx')
 const liyp  = src('LowIncomeYouthProgram.jsx')
 const board = src('UniqueGroupClassesBoard.jsx')
 
 const moduleSrc = [
-  slice(dt,    /^const FAMILY_RULES = \[/m,        /^\]/m,   'FAMILY_RULES in DiscountTrends.jsx'),
-  slice(dt,    /^const EXCLUDED_RULES = \[/m,      /^\]/m,   'EXCLUDED_RULES in DiscountTrends.jsx'),
-  slice(dt,    /^const UNMATCHED = /m,             /\n/,     'UNMATCHED in DiscountTrends.jsx'),
-  slice(dt,    /^function familyOf\(/m,            /^\}/m,   'familyOf in DiscountTrends.jsx'),
   slice(piano, /^function isPianoKeyboard\(/m,     /^\}/m,   'isPianoKeyboard in PianoInspiresGrant.jsx'),
   slice(choir, /^const COURSE_RE = /m,             /\n/,     'COURSE_RE in NeighborhoodChoirDemographics.jsx'),
   slice(choir, /^function isNeighborhoodChoir\(/m, /^\}/m,   'isNeighborhoodChoir in NeighborhoodChoirDemographics.jsx'),
@@ -55,6 +50,9 @@ const moduleSrc = [
   slice(board, /^const YMP_PREFIX = /m,            /\n/,     'YMP_PREFIX in UniqueGroupClassesBoard.jsx'),
   `import { INCOME_MAP, incomeCategoryFor, ethnicityLabelFor, genderLabelFor, ETHNICITY_ALIASES, GENDER_ALIASES } from '${join(root, 'src/reports/demographicCategories.js')}'`,
   `import { classStartDate } from '${join(root, 'src/utils/periodUtils.js')}'`,
+  // Discount families are a shared module now, so they are imported rather than
+  // sliced out of a report — one less anchor that can drift.
+  `import { familyOf, UNMATCHED } from '${join(root, 'src/reports/discountFamilies.js')}'`,
   'export { familyOf, UNMATCHED, isPianoKeyboard, isNeighborhoodChoir, isSlidingOrMerit, YMP_COURSES, YMP_PREFIX, CATEGORY_MAP, departmentCategory, INCOME_MAP, incomeCategoryFor, ethnicityLabelFor, genderLabelFor, ETHNICITY_ALIASES, GENDER_ALIASES, classStartDate }',
 ].join('\n\n')
 

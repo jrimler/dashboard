@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
 import { fetchAll, fetchByIds, joinBy } from '../utils/fetchAll'
 import { quarterSortKey, parseQuarter, quarterFYLabel, classStartDate } from '../utils/periodUtils'
+import { familyOf, UNMATCHED } from './discountFamilies'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Enrollment Narrative
@@ -35,7 +36,29 @@ const METRICS = [
   { key: 'feeGroup',     label: 'fee-based group classes',  f: e => !e.isTuitionFree && e.activityType === 'CLASS' },
   { key: 'freeLessons',  label: 'tuition-free lessons',       f: e =>  e.isTuitionFree && e.activityType === 'LESSON' },
   { key: 'freeGroup',    label: 'tuition-free group classes', f: e =>  e.isTuitionFree && e.activityType === 'CLASS' },
+
+  { key: 'missionLessons',  label: 'Mission lessons',        f: e => e.location === MISSION && e.activityType === 'LESSON' },
+  { key: 'missionGroup',    label: 'Mission group classes',  f: e => e.location === MISSION && e.activityType === 'CLASS' },
+  { key: 'missionFree',     label: 'Mission tuition-free',   f: e => e.location === MISSION && e.isTuitionFree },
+  { key: 'richmondLessons', label: 'Richmond lessons',       f: e => e.location === RICHMOND && e.activityType === 'LESSON' },
+  { key: 'richmondGroup',   label: 'Richmond group classes', f: e => e.location === RICHMOND && e.activityType === 'CLASS' },
+  { key: 'richmondFree',    label: 'Richmond tuition-free',  f: e => e.location === RICHMOND && e.isTuitionFree },
 ]
+
+// Each branch is also broken down internally, so the report can say how a branch
+// changed shape rather than only whether it grew. Keyed by the branch's metric.
+const BRANCH_PARTS = {
+  mission: [
+    { key: 'missionLessons', label: 'private lessons' },
+    { key: 'missionGroup',   label: 'group classes' },
+    { key: 'missionFree',    label: 'tuition-free' },
+  ],
+  richmond: [
+    { key: 'richmondLessons', label: 'private lessons' },
+    { key: 'richmondGroup',   label: 'group classes' },
+    { key: 'richmondFree',    label: 'tuition-free' },
+  ],
+}
 
 // Sub-metrics scanned for the "notable movements" paragraph. The headline rows
 // (total, and the branch/type splits already covered in their own paragraphs)
@@ -131,6 +154,63 @@ export function seasonalCaveat(periodA, periodB, medians) {
          `so most of that difference is the shape of the calendar rather than a change in demand.`
 }
 
+// ─── same-season trend ──────────────────────────────────────────────────────
+
+// A branch compared against itself over time. Only quarters of the SAME season
+// are used: comparing Mission's fall against its own summer would measure the
+// calendar, exactly the trap the seasonal caveat exists to flag. The result is a
+// run of same-season quarters ending at the focus quarter, oldest first.
+export function sameSeasonSeries(focusPeriod, statsByPeriod, metricKey) {
+  const q = parseQuarter(focusPeriod)
+  if (!q) return []
+  return Object.keys(statsByPeriod)
+    .filter(p => {
+      const pq = parseQuarter(p)
+      return pq && pq.season === q.season && pq.year <= q.year
+    })
+    .sort((a, b) => quarterSortKey(a) - quarterSortKey(b))
+    .map(p => ({ period: p, year: parseQuarter(p).year, value: statsByPeriod[p][metricKey].enr }))
+}
+
+// Describes a run of values as a trajectory. Deliberately conservative: it
+// reports the net movement across the run and whether the direction was
+// consistent, and says nothing about what comes next.
+export function trendPhrase(series) {
+  if (series.length < 3) return null
+  const first = series[0], last = series.at(-1)
+  const d = delta(first.value, last.value)
+  const steps = series.slice(1).map((p, i) => p.value - series[i].value)
+  const ups = steps.filter(v => v > 0).length, downs = steps.filter(v => v < 0).length
+  const spread = `${series.map(p => n(p.value)).join(' → ')}`
+
+  let shape
+  if (ups && !downs)      shape = 'rising in every one'
+  else if (downs && !ups) shape = 'falling in every one'
+  else if (Math.abs(d.pct ?? 0) < FLAT_PCT) shape = 'ending close to where it started'
+  else shape = `moving unevenly (up in ${ups}, down in ${downs})`
+
+  const net = d.raw === 0
+    ? 'level overall'
+    : `a net ${d.raw > 0 ? 'gain' : 'loss'} of ${n(Math.abs(d.raw))}${pctText(d) ? ` (${pctText(d)})` : ''}`
+  return `Across the last ${series.length} ${parseQuarter(first.period).season.toLowerCase()} quarters it ran ${spread} — ${net}, ${shape}.`
+}
+
+// ─── discounts ──────────────────────────────────────────────────────────────
+
+// Discount families come from discountFamilies.js, shared with the Discount
+// Trends report, so the two cannot disagree about what a code means.
+export function discountFamilyCounts(rows) {
+  const out = {}
+  for (const r of rows) {
+    const code = (r.discountType ?? '').trim()
+    if (!code) continue
+    const fam = familyOf(code)
+    if (fam === null) continue   // deliberately excluded, not a program family
+    out[fam] = (out[fam] ?? 0) + 1
+  }
+  return out
+}
+
 // ─── completeness ───────────────────────────────────────────────────────────
 
 // A quarter pulled from ASAP mid-term is missing its later-starting sections.
@@ -164,7 +244,7 @@ export function completenessCaveat(focusRows, priorRows) {
  * @param seq    { period, stats }       | null — another quarter to compare
  * @param medians  season → median quarter total, from seasonMedians()
  */
-export function buildNarrative({ focus, yoy, seq, medians }) {
+export function buildNarrative({ focus, yoy, seq, medians, statsByPeriod = {} }) {
   const paras = []
   const F = focus.stats
 
@@ -218,7 +298,7 @@ export function buildNarrative({ focus, yoy, seq, medians }) {
     paras.push({ id: 'type', title: 'Lessons and group classes', sentences: s })
   }
 
-  // 4 ── branches
+  // 4 ── branches, side by side
   {
     const s = []
     const ms = shareText(F.mission.enr, F.total.enr), rs = shareText(F.richmond.enr, F.total.enr)
@@ -232,7 +312,77 @@ export function buildNarrative({ focus, yoy, seq, medians }) {
     paras.push({ id: 'branch', title: 'Branches', sentences: s })
   }
 
-  // 5 ── notable movements
+  // 5 ── each branch measured against its own history
+  for (const [key, label] of [['mission', 'Mission Branch'], ['richmond', 'Richmond Branch']]) {
+    const s = []
+    const cur = F[key].enr
+    s.push(`${label} recorded ${n(cur)} enrollments from ${n(F[key].stu)} unique students.`)
+
+    // Trend against itself, same season only.
+    const series = sameSeasonSeries(focus.period, statsByPeriod, key)
+    const trend = trendPhrase(series)
+    if (trend) s.push(trend)
+
+    // How the branch changed shape internally, not just in size.
+    if (yoy) {
+      const parts = BRANCH_PARTS[key].map(part => {
+        const d = delta(yoy.stats[part.key].enr, F[part.key].enr)
+        return { ...part, d }
+      })
+      s.push(`Against ${yoy.period}, its ` +
+             parts.map(p => `${p.label} ${movementPhrase(p.d)}`).join(', ') + '.')
+
+      // A branch can hold its total while its composition moves underneath.
+      const total = delta(yoy.stats[key].enr, F[key].enr)
+      const biggest = [...parts].sort((a, b) => Math.abs(b.d.raw) - Math.abs(a.d.raw))[0]
+      if (Math.abs(total.raw) < FLAT_RAW && biggest && Math.abs(biggest.d.raw) >= FLAT_RAW) {
+        s.push(`Its overall size barely moved, but the mix underneath it did.`)
+      }
+    }
+    paras.push({ id: `branch-${key}`, title: `${label} over time`, sentences: s })
+  }
+
+  // 6 ── discounts
+  {
+    const s = []
+    const fams = discountFamilyCounts(focus.rows ?? [])
+    const discounted = Object.values(fams).reduce((a, b) => a + b, 0)
+    if (discounted) {
+      const share = shareText(discounted, F.total.enr)
+      const ranked = Object.entries(fams).sort((a, b) => b[1] - a[1])
+      s.push(`${n(discounted)} enrollments carried a discount code${share ? `, ${share} of the quarter` : ''}, ` +
+             `across ${ranked.length} program famil${ranked.length === 1 ? 'y' : 'ies'}.`)
+      s.push(`The largest were ` +
+             ranked.slice(0, 3).map(([f, c]) => `${f} (${n(c)})`).join(', ') + '.')
+
+      if (yoy) {
+        const prev = discountFamilyCounts(yoy.rows ?? [])
+        const moves = [...new Set([...Object.keys(fams), ...Object.keys(prev)])]
+          .map(f => ({ family: f, d: delta(prev[f] ?? 0, fams[f] ?? 0) }))
+          .filter(x => Math.abs(x.d.raw) >= FLAT_RAW)
+          .sort((a, b) => Math.abs(b.d.raw) - Math.abs(a.d.raw))
+          .slice(0, 3)
+        if (moves.length) {
+          s.push(`Year over year, ` +
+                 moves.map(m => `${m.family} ${movementPhrase(m.d, { verbUp: 'rose', verbDown: 'fell' })}`).join(', ') + '.')
+        } else {
+          s.push(`No family moved by more than ${FLAT_RAW} enrollments year over year.`)
+        }
+        const totalPrev = Object.values(prev).reduce((a, b) => a + b, 0)
+        const dTotal = delta(totalPrev, discounted)
+        s.push(`Discounted enrollments overall ${movementPhrase(dTotal)}.`)
+      }
+
+      // An unmatched code is a new ASAP spelling nobody has classified yet.
+      if (fams[UNMATCHED]) {
+        s.push(`${n(fams[UNMATCHED])} enrollment${fams[UNMATCHED] === 1 ? '' : 's'} carried a code matching no ` +
+               `known family — check the Discount Trends report's Unmatched row before quoting these figures.`)
+      }
+      paras.push({ id: 'discounts', title: 'Discounts', sentences: s })
+    }
+  }
+
+  // 7 ── notable movements
   if (yoy) {
     const moves = MOVER_KEYS
       .map(key => {
@@ -254,7 +404,7 @@ export function buildNarrative({ focus, yoy, seq, medians }) {
     paras.push({ id: 'movers', title: 'Notable movements', sentences: s })
   }
 
-  // 6 ── caveats
+  // 8 ── caveats
   {
     const s = []
     if (yoy) {
@@ -333,14 +483,24 @@ export default function EnrollmentNarrative() {
 
   // Phase 2: full detail for just the selected quarters.
   useEffect(() => {
-    const wanted = [focus, yoyPeriod, seqPeriod].filter(Boolean)
+    // The branch trends compare a branch against its own history, so every
+    // same-season quarter up to the focus is loaded too — comparing Mission's
+    // fall against its own summer would measure the calendar, not the branch.
+    const fq = parseQuarter(focus)
+    const sameSeason = fq
+      ? quarters.filter(q => {
+          const p = parseQuarter(q)
+          return p && p.season === fq.season && p.year <= fq.year
+        })
+      : []
+    const wanted = [...new Set([focus, yoyPeriod, seqPeriod, ...sameSeason].filter(Boolean))]
     if (!wanted.length) { setRows(null); return }
     let cancelled = false
     setBusy(true)
     ;(async () => {
       try {
         const enr = await fetchAll(supabase, 'enrollments', {
-          select: 'event_enrollment_id, event_id, customer_id, time_period, is_tuition_free',
+          select: 'event_enrollment_id, event_id, customer_id, time_period, is_tuition_free, discount_type',
           orderBy: 'event_enrollment_id',
           apply: q => q.in('time_period', wanted),
         })
@@ -366,6 +526,7 @@ export default function EnrollmentNarrative() {
           ;(byPeriod[e.time_period] ??= []).push({
             cid:           e.customer_id,
             isTuitionFree: e.is_tuition_free,
+            discountType:  e.discount_type,
             location:      e.ev?.location ?? null,
             activityType:  e.ev?.activity_type ?? null,
             classStart:    e.ev?.class_start_date ?? null,
@@ -379,7 +540,7 @@ export default function EnrollmentNarrative() {
       }
     })()
     return () => { cancelled = true }
-  }, [focus, yoyPeriod, seqPeriod])
+  }, [focus, yoyPeriod, seqPeriod, quarters])
 
   const medians = useMemo(() => seasonMedians(totals), [totals])
 
@@ -390,7 +551,9 @@ export default function EnrollmentNarrative() {
       : null
     const f = unit(focus)
     if (!f) return null
-    return buildNarrative({ focus: f, yoy: unit(yoyPeriod), seq: unit(seqPeriod), medians })
+    const statsByPeriod = {}
+    for (const [p, rows] of Object.entries(rowsByPeriod)) statsByPeriod[p] = buildQuarterStats(rows)
+    return buildNarrative({ focus: f, yoy: unit(yoyPeriod), seq: unit(seqPeriod), medians, statsByPeriod })
   }, [rowsByPeriod, focus, yoyPeriod, seqPeriod, medians])
 
   function copyText() {
@@ -452,6 +615,36 @@ export default function EnrollmentNarrative() {
               a caveat sentence when the two seasons differ in scale by more than{' '}
               {Math.round(SEASON_SCALE_TOLERANCE * 100)}%. The comparison is still shown — it is just
               labelled for what it is.
+            </p>
+
+            <div className="ugcb-info-section-title">Branches over time</div>
+            <p>
+              Each branch also gets its own paragraph, measured against <em>itself</em> rather than
+              against the other one. The trend line uses only quarters of the <strong>same season</strong>
+              — comparing Mission's fall against its own summer would measure the calendar, which is the
+              same trap the seasonal caveat exists to flag. It needs at least three same-season quarters
+              on file before it will state a trend, and it reports the net movement and whether the
+              direction was consistent; it never extrapolates forward.
+            </p>
+            <p>
+              Each branch paragraph also breaks the branch down internally — lessons, group classes,
+              tuition-free — so the report can say a branch changed <em>shape</em> even when its total
+              barely moved.
+            </p>
+
+            <div className="ugcb-info-section-title">Discounts</div>
+            <p>
+              Discount codes are collapsed into program families by the same rules the{' '}
+              <strong>Discount Trends</strong> report uses — the definitions are shared in{' '}
+              <code>discountFamilies.js</code>, so the two reports cannot disagree about what a code
+              means. The paragraph reports how many enrollments carried a discount, the largest
+              families, and which families moved most year over year.
+            </p>
+            <p>
+              ASAP relabels discount codes nearly every term. A code matching no known family lands in
+              an <em>Unmatched</em> bucket rather than being dropped, and when any turn up here the
+              paragraph says so and points at the Discount Trends report — a silently deflated family
+              would be worse than a visible unknown.
             </p>
 
             <div className="ugcb-info-section-title">Before quoting the figures</div>
