@@ -153,9 +153,17 @@ const t0 = Date.now()
 await navigateInApp(route)
 
 // Reports fetch after mount; wait for the loading placeholder to clear.
+//
+// Matching the literal word "Loading" was not enough: a report that loads in two
+// phases shows a second, differently worded placeholder ("Reading those
+// quarters…"), and this walked straight past it and screenshotted the spinner.
+// Every placeholder in the app is a .coming-soon element whose text ends in an
+// ellipsis, while a genuine empty state ("Pick a quarter to summarise.") does
+// not — so wait on that convention instead of on one specific string.
 try {
   await page.waitForFunction(
-    () => !document.body.innerText.includes('Loading'),
+    () => ![...document.querySelectorAll('.coming-soon')]
+      .some(el => /[…]\s*$/.test(el.textContent.trim())),
     { timeout: 90000 }
   )
 } catch {

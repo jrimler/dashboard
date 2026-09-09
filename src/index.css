@@ -1379,3 +1379,64 @@
   font-size: 0.9em;
   margin-top: 2px;
 }
+
+/* ── Enrollment Narrative ─────────────────────────────────────────────────── */
+
+.narr-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.narr-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 220px;
+}
+
+.narr-field-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-muted);
+}
+
+.narr-field select {
+  padding: 7px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-surface);
+  font-size: 0.95rem;
+}
+
+.narr-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
+
+/* Prose measure: long enough to read as a document, short enough to scan. */
+.narr-body {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 24px 28px;
+  max-width: 68ch;
+}
+
+.narr-para + .narr-para { margin-top: 20px; }
+
+.narr-para-title {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-muted);
+  margin: 0 0 6px;
+}
+
+.narr-para p {
+  margin: 0;
+  line-height: 1.65;
+}

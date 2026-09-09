@@ -6,6 +6,7 @@ import DiscountCodes from './DiscountCodes'
 import DiscountTrends from './DiscountTrends'
 import NeighborhoodChoirDemographics from './NeighborhoodChoirDemographics'
 import EnrollmentTrends from './EnrollmentTrends'
+import EnrollmentNarrative from './EnrollmentNarrative'
 
 // Order here is the order the cards appear on the Reports page — keep it
 // alphabetical by label so a growing list stays easy to scan.
@@ -27,6 +28,12 @@ export const REPORTS = [
     label:       'Discount Trends',
     description: 'How each kind of discount has grown or shrunk across fiscal years — ASAP’s many code spellings collapsed into standing program families.',
     component:   DiscountTrends,
+  },
+  {
+    id:          'enrollment-narrative',
+    label:       'Enrollment Narrative',
+    description: 'A plain-language summary of one quarter — the Enrollment page\u2019s figures written out as prose, compared against the same quarter a year earlier and any other quarter you pick.',
+    component:   EnrollmentNarrative,
   },
   {
     id:          'enrollment-trends',

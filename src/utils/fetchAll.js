@@ -94,3 +94,43 @@ export function joinBy(rows, related, { on, as, relatedKey = on }) {
   for (const row of rows) row[as] = index.get(row[on])
   return rows
 }
+
+/**
+ * Fetch rows whose `column` matches any of `values`, in chunks.
+ *
+ * A PostgREST `.in()` filter travels in the URL, so a long list simply produces
+ * a request too long to send: three quarters of enrollments reference ~3,200
+ * events, which is a 25,000-character URL and a flat 400 from the server. The
+ * failure is silent in the sense that it looks like a network error rather than
+ * "your list is too long", so it is worth never constructing that URL at all.
+ *
+ * Chunks are issued in parallel, capped the same way as paged reads.
+ *
+ * @param supabase  the Supabase client
+ * @param table     table name
+ * @param column    column to match (typically a key)
+ * @param values    values to match; deduped here
+ * @param select    PostgREST select string
+ */
+export async function fetchByIds(supabase, table, { column, values, select }) {
+  const unique = [...new Set(values.filter(v => v != null))]
+  if (!unique.length) return []
+
+  // ~500 ids of a typical key length keeps each URL a few KB, well inside every
+  // limit, while still making few enough requests to stay fast.
+  const CHUNK = 500
+  const chunks = []
+  for (let i = 0; i < unique.length; i += CHUNK) chunks.push(unique.slice(i, i + CHUNK))
+
+  const results = await inBatches(
+    chunks.map(ids => () => supabase.from(table).select(select).in(column, ids)),
+    MAX_CONCURRENT
+  )
+
+  const rows = []
+  for (const r of results) {
+    if (r.error) throw new Error(r.error.message)
+    rows.push(...r.data)
+  }
+  return rows
+}
