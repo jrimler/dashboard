@@ -50,3 +50,26 @@ export function periodLabel(p) {
   if (!q) return p.value
   return `${SEASON_SHORT[q.season] ?? q.season.slice(0, 3)} ${q.year}`
 }
+
+// ASAP writes a far-future placeholder class start date (2050-01-01 in the data
+// so far) when the real one is missing — the mirror of the 1900-01-01
+// placeholder birthdate. It matters because Demographics, LIYP and the Board
+// report all compute a student's age *at the class start date*, so a
+// placeholder silently ages a student into an older bracket: a 40-year-old
+// enrolled in a 2050-dated section reads as 65. Existing age guards don't catch
+// it, because the inflated age still looks perfectly plausible.
+//
+// Returns the date unchanged, or null when it can't be real — callers then
+// treat it as "no date on record", exactly as they do a missing one.
+const MIN_PLAUSIBLE_CLASS_YEAR = 2015
+
+// Floats with the clock so this never needs revisiting: a class scheduled more
+// than five years out is a placeholder, not a schedule.
+function maxPlausibleClassYear() { return new Date().getFullYear() + 5 }
+
+export function classStartDate(raw) {
+  if (!raw) return null
+  const year = Number(String(raw).slice(0, 4))
+  if (!year || year < MIN_PLAUSIBLE_CLASS_YEAR || year > maxPlausibleClassYear()) return null
+  return raw
+}

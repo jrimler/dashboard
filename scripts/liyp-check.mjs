@@ -13,7 +13,7 @@ import { sb } from './db.mjs'
 
 const root       = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const reportPath = join(root, 'src/reports/LowIncomeYouthProgram.jsx')
-const sharedPath = join(root, 'src/reports/demographicCategories.js')
+const reportDir  = join(root, 'src/reports')
 
 // ─── extract the report's pure logic verbatim ───────────────────────────────
 const src   = readFileSync(reportPath, 'utf8')
@@ -25,16 +25,22 @@ if (start < 0 || end < 0) {
 }
 const block = src.slice(start, end)
 
-// Reuse the report's own import of the shared categories, verbatim apart from
-// the module specifier — so adding a name there can't leave this check behind.
-const sharedImport = src.match(/import\s*\{[^}]*\}\s*from\s*'\.\/demographicCategories'/)
-if (!sharedImport) {
-  console.error("Could not find the './demographicCategories' import in LowIncomeYouthProgram.jsx")
+// Reuse the report's own imports verbatim apart from the module specifier, so
+// a name added to any of them can't leave this check behind. Every relative
+// import except React and the browser Supabase client is carried across —
+// the pure-logic block draws on the shared category definitions and the date
+// helpers alike, and hardcoding one of them silently broke this check when the
+// block started using another.
+const imports = [...src.matchAll(/^import\s*\{[^}]*\}\s*from\s*'(\.[^']*)'/gm)]
+  .filter(m => !/lib\/supabase/.test(m[1]))
+  .map(m => m[0].replace(`'${m[1]}'`, `'${resolve(reportDir, m[1])}.js'`.replace('.js.js', '.js')))
+if (!imports.length) {
+  console.error('Could not find any relative import in LowIncomeYouthProgram.jsx')
   process.exit(1)
 }
 
 const moduleSrc = [
-  sharedImport[0].replace("'./demographicCategories'", `'${sharedPath}'`),
+  ...imports,
   block,
   'export { buildReport, buildComparison, cellDelta, DIMENSIONS, GROUPS, isSlidingOrMerit, ageAtDate }',
 ].join('\n')

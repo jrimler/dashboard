@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { supabase } from '../lib/supabase'
-import { fySortKey } from '../utils/periodUtils'
+import { fySortKey, classStartDate } from '../utils/periodUtils'
 import {
   NO_RESPONSE, INCOME_ORDER,
   INCOME_PCT_EXCLUDED, RESPONSE_PCT_EXCLUDED, pctBase, bucketPct,
@@ -165,7 +165,9 @@ function buildReport(enrollments) {
     //    4–18 at class start.
     if (isSlidingOrMerit(dt)) {
       slidingSeen.add(cid)
-      const age = ageAtDate(student.birthdate, e.events?.class_start_date)
+      // classStartDate() nulls ASAP's far-future placeholder; ageAtDate returns
+      // null for a missing reference date, which the age range below rejects.
+      const age = ageAtDate(student.birthdate, classStartDate(e.events?.class_start_date))
       if (age !== null && age >= MIN_AGE && age <= MAX_AGE && age <= MAX_PLAUSIBLE_AGE) {
         addMember('sliding', cid, student)
       }
@@ -595,7 +597,8 @@ export default function LowIncomeYouthProgram() {
                 code, including the older Mission/Richmond satellite variants) <em>or</em> a Merit
                 scholarship (any code containing "Merit"). Age is measured at the enrollment's class
                 start date; students whose age can't be confirmed 4–18 (missing or placeholder
-                birthdate) are excluded and counted separately below.</li>
+                birthdate, or a section carrying ASAP's far-future 2050-01-01 placeholder start
+                date) are excluded and counted separately below.</li>
               <li><strong>YMP</strong> — students enrolled in Young Musicians Program / Saturday Play!
                 (Ensemble or Theory) or Mission District YMP / Saturday Play!.</li>
               <li><strong>Children's Chorus</strong> and <strong>Teen Jazz Orchestra</strong> —

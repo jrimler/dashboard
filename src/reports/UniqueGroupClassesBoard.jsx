@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
-import { quarterSortKey, fySortKey } from '../utils/periodUtils'
+import { quarterSortKey, fySortKey, classStartDate } from '../utils/periodUtils'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -173,7 +173,9 @@ function buildGroups(eventsData, scheduleByEventId, enrollmentsData) {
     const g = groups[key]
     if (ev.time_period) g.timePeriods.add(ev.time_period)
     for (const enr of (enrollmentsByEvent[ev.event_id] ?? [])) {
-      g.enrichedEnrollments.push({ ...enr, _class_start_date: ev.class_start_date })
+      // Placeholder start dates are nulled here so the Youth/Adult split can't
+      // be flipped by an age computed against a date that isn't real.
+      g.enrichedEnrollments.push({ ...enr, _class_start_date: classStartDate(ev.class_start_date) })
     }
   }
 
@@ -481,6 +483,8 @@ export default function UniqueGroupClassesBoard() {
               Each enrolled student's age is calculated as of their event's <strong>class start date</strong>.
               Students with no birthdate on record — or an implausible one, such as the
               1900-01-01 placeholder ASAP writes when a birthdate is missing — are excluded from the age check.
+              A section carrying ASAP's far-future placeholder start date (2050-01-01) is likewise treated as
+              having no start date, so an age measured against a date that isn't real can't flip a class to Adult.
               If every student with a known birthdate is under 19 across all matching events, the class is
               classified as <strong>Youth</strong>; otherwise <strong>Adult</strong>.
               If no enrolled students have a birthdate on record, the class defaults to Adult

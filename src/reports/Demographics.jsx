@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef, Fragment } from 'react'
 import { supabase } from '../lib/supabase'
 import {
-  fySortKey, quarterSortKey, parseQuarter, quarterFYLabel, periodLabel,
+  fySortKey, quarterSortKey, parseQuarter, quarterFYLabel, periodLabel, classStartDate,
 } from '../utils/periodUtils'
 import {
   NO_RESPONSE, INCOME_ORDER, INCOME_PCT_EXCLUDED, RESPONSE_PCT_EXCLUDED,
@@ -102,7 +102,9 @@ function buildUnits(enrollments) {
     if (!cid) continue
     const ev      = e.events   ?? null
     const student = e.students ?? {}
-    const start   = ev?.class_start_date ?? null
+    // classStartDate() nulls ASAP's far-future placeholder so it can't inflate
+    // an age bracket; a null start is already handled as no date on record.
+    const start   = classStartDate(ev?.class_start_date)
 
     // Total Students: every unique student with any enrollment in the period,
     // across LESSON and CLASS alike, counted once.
@@ -581,7 +583,10 @@ export default function Demographics() {
         <p>
           <strong>Age</strong> is calculated at the earliest class start date within the unit being
           counted and bucketed into 0–2, 3–35, 36–54, 55–74, and 75+. A missing birthdate — or a
-          placeholder one before 1905, which ASAP writes as 1900-01-01 — counts as No Response.{' '}
+          placeholder one before 1905, which ASAP writes as 1900-01-01 — counts as No Response.
+          ASAP also writes a far-future placeholder <em>class start date</em> (2050-01-01) when a
+          section's real one is missing; those are treated as no date on record too, so they can't
+          push a student into an older bracket.{' '}
           <strong>Ethnicity</strong> and <strong>gender</strong> use the stored value as the category
           label, with related labels merged (Hispanic and Latinx to Hispanic/Latinx; Pacific Islander
           and Native Hawaiian to Native Hawaiian or Other Pacific Islander; the trans and

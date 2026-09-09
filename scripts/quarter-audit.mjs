@@ -54,7 +54,8 @@ const moduleSrc = [
   slice(board, /^const CATEGORY_MAP = \{/m,        /^\}/m,   'CATEGORY_MAP in UniqueGroupClassesBoard.jsx'),
   slice(board, /^const YMP_PREFIX = /m,            /\n/,     'YMP_PREFIX in UniqueGroupClassesBoard.jsx'),
   `import { INCOME_MAP, incomeCategoryFor, ethnicityLabelFor, genderLabelFor, ETHNICITY_ALIASES, GENDER_ALIASES } from '${join(root, 'src/reports/demographicCategories.js')}'`,
-  'export { familyOf, UNMATCHED, isPianoKeyboard, isNeighborhoodChoir, isSlidingOrMerit, YMP_COURSES, YMP_PREFIX, CATEGORY_MAP, departmentCategory, INCOME_MAP, incomeCategoryFor, ethnicityLabelFor, genderLabelFor, ETHNICITY_ALIASES, GENDER_ALIASES }',
+  `import { classStartDate } from '${join(root, 'src/utils/periodUtils.js')}'`,
+  'export { familyOf, UNMATCHED, isPianoKeyboard, isNeighborhoodChoir, isSlidingOrMerit, YMP_COURSES, YMP_PREFIX, CATEGORY_MAP, departmentCategory, INCOME_MAP, incomeCategoryFor, ethnicityLabelFor, genderLabelFor, ETHNICITY_ALIASES, GENDER_ALIASES, classStartDate }',
 ].join('\n\n')
 
 const modPath = join(mkdtempSync(join(tmpdir(), 'quarter-audit-')), 'rules.mjs')
@@ -123,13 +124,15 @@ const flagMismatch = rows.filter(e => (((+e.amount || 0) - (+e.total_discount ||
 flagMismatch ? problem(`${flagMismatch} rows where is_tuition_free disagrees with (amount - discount <= 15)`)
              : ok('is_tuition_free matches the rule on every row')
 // ASAP writes a placeholder far-future start date when the real one is missing,
-// the mirror of the 1900-01-01 birthdate. It matters because both the Board
-// report and LIYP compute a student's age *at the class start date*, so a
-// placeholder start silently ages a youth into the adult bucket.
-const badStart = evs.filter(e => e.class_start_date && (e.class_start_date < '2015-01-01' || e.class_start_date > '2030-01-01'))
+// the mirror of the 1900-01-01 birthdate. classStartDate() in periodUtils.js
+// nulls these so they can't inflate an age, so this is a note rather than a
+// failure: no number is wrong, but every student in the section now has an
+// unknown age, and the date is still wrong in ASAP.
+const badStart = evs.filter(e => R.classStartDate(e.class_start_date) === null && e.class_start_date)
 badStart.length
-  ? problem(`${badStart.length} section(s) with an implausible class_start_date (ages are computed from it): ` +
-            badStart.map(e => `${e.class_start_date} ${JSON.stringify(e.course_name)}`).join(', '))
+  ? note(`${badStart.length} section(s) carry a placeholder class_start_date. Ages there are treated as ` +
+         `unknown rather than wrong, but the date should be corrected in ASAP: ` +
+         badStart.map(e => `${e.class_start_date} ${JSON.stringify(e.course_name)}`).join(', '))
   : ok('every section has a plausible class start date')
 
 const negAmt = rows.filter(e => (+e.amount || 0) < 0).length
