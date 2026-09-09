@@ -311,11 +311,13 @@ export async function uploadReports(regularFile, superFile, studentFile, log, cl
     await upsertInBatches('events', events, 'event_id', log)
   }
 
+  let periods = []
+
   if (enrollments.length > 0) {
     // A REGULAR+SUPER pair is a full snapshot of the time periods it contains,
     // so rows from earlier snapshots of those periods (enrollments since
     // cancelled or changed in ASAP) must not survive the new upload.
-    const periods = [...new Set(enrollments.map(e => e.time_period).filter(Boolean))]
+    periods = [...new Set(enrollments.map(e => e.time_period).filter(Boolean))]
     if (periods.length > 0) {
       log(`Replacing existing enrollments for: ${periods.join(', ')}`)
       const { error } = await supabase.from('enrollments').delete().in('time_period', periods)
@@ -329,6 +331,27 @@ export async function uploadReports(regularFile, superFile, studentFile, log, cl
     log('Upserting class schedule...')
     await upsertClassSchedule(classScheduleRows, log)
   }
+
+  // Record the run. This is the only place upload time is stored — every table
+  // is upserted in place, so without this row there's no way to tell when the
+  // data landed. Deliberately not fatal: the data is already committed, and a
+  // failed bookkeeping write shouldn't report the upload itself as failed.
+  const files = [
+    regularFile && 'Enrollment',
+    superFile   && 'Super Enrollment',
+    studentFile && 'Student',
+    classFile   && 'Super Class Summary',
+  ].filter(Boolean)
+
+  const { error: logError } = await supabase.from('upload_log').insert({
+    files,
+    student_count:        students.length,
+    event_count:          events.length,
+    enrollment_count:     enrollments.length,
+    class_schedule_count: classScheduleRows.length,
+    time_periods:         periods,
+  })
+  if (logError) log(`WARNING: upload succeeded but recording it in upload_log failed: ${logError.message}`)
 
   log('Upload complete.')
 }

@@ -111,6 +111,22 @@ Primary key: `event_enrollment_id` (join of REGULAR + SUPER)
 | `is_tuition_free` | boolean | `(amount - total_discount) <= 15` |
 | `instructor_name` | text | "Last, First" from REGULAR |
 
+### `upload_log`
+Primary key: `id` (identity). One row per completed upload run — added in migration 004.
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | bigint PK | identity |
+| `uploaded_at` | timestamptz | defaults to `now()` |
+| `files` | text[] | Which of the four ASAP exports were included, by label |
+| `student_count` | integer | Rows upserted this run |
+| `event_count` | integer | |
+| `enrollment_count` | integer | |
+| `class_schedule_count` | integer | |
+| `time_periods` | text[] | Quarters the enrollment batch replaced |
+
+This is the **only** record of when data landed: every other table is upserted in place, so an overwritten row leaves no trace of the upload that wrote it. The row is written after all upserts succeed, so its presence means the data is committed. A failed log write is non-fatal — it emits a warning in the upload log rather than reporting the upload itself as failed, since the data is already in by that point.
+
 ---
 
 ## Upload Pipeline (`src/utils/uploadReports.js`)
@@ -124,6 +140,7 @@ Primary key: `event_enrollment_id` (join of REGULAR + SUPER)
 7. Enrollments with no matching `customer_id` in the parsed student data are skipped with a logged warning to avoid FK violations
 8. `location` is `.trim()`-ed on ingest (Richmond source data has trailing spaces)
 9. CLASS SCHEDULE is upserted last (after enrollments) because `class_schedule.event_id` FK references `events`
+10. After every upsert succeeds, one row is written to `upload_log` recording the timestamp, which files were included, per-table row counts, and the quarters replaced
 
 **Student uploads are last-write-wins** per `customer_id`: when re-uploading multiple STUDENT reports, go oldest → newest so the most recent demographics survive.
 
@@ -238,6 +255,8 @@ Email/password authentication via Supabase Auth. Shown to any unauthenticated vi
 
 ### Upload
 Four labeled report sections, each showing: report name, linked ASAP URL (opens in new tab), run instructions, and a file picker. Reports: Enrollment Report, Super Enrollment Report, Student Report, Super Class Summary Report. Upload button, scrolling status log. Each file is optional. Test Connection button validates Supabase credentials.
+
+A **"Last upload"** panel sits under the subtitle, reading the newest `upload_log` row: timestamp, which exports were included, per-table row counts, and the quarters replaced. It refreshes after a successful upload. If `upload_log` is missing or empty the panel is simply not rendered, so the page works unchanged before migration 004 is applied.
 
 ---
 

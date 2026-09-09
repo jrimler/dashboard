@@ -1362,3 +1362,20 @@
   /* Tooltips are a screen affordance. */
   .et-tip { display: none !important; }
 }
+
+/* "Last upload" stamp on the Upload page — the only surfaced record of when
+   dashboard data was last refreshed. */
+.last-upload {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-bottom: 28px;
+  line-height: 1.5;
+}
+
+.last-upload-detail {
+  color: var(--color-muted);
+  font-size: 0.9em;
+  margin-top: 2px;
+}

@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { uploadReports } from '../utils/uploadReports'
 import { supabase } from '../lib/supabase'
 
@@ -12,7 +12,21 @@ export default function Upload() {
   const [testing, setTesting]           = useState(false)
   const [done, setDone]                 = useState(false)
   const [error, setError]               = useState(null)
+  const [lastUpload, setLastUpload]     = useState(null)
   const logEndRef                       = useRef(null)
+
+  // The upload_log row is the only record of when data landed — every table is
+  // upserted in place, so nothing else carries an ingest time.
+  const loadLastUpload = useCallback(async () => {
+    const { data, error: err } = await supabase
+      .from('upload_log')
+      .select('*')
+      .order('uploaded_at', { ascending: false })
+      .limit(1)
+    if (!err && data?.length) setLastUpload(data[0])
+  }, [])
+
+  useEffect(() => { loadLastUpload() }, [loadLastUpload])
 
   function appendLog(msg) {
     setLog(prev => {
@@ -63,6 +77,7 @@ export default function Upload() {
     try {
       await uploadReports(regularFile, superFile, studentFile, appendLog, classFile)
       setDone(true)
+      await loadLastUpload()
     } catch (err) {
       setError(err.message)
       appendLog(`ERROR: ${err.message}`)
@@ -78,6 +93,8 @@ export default function Upload() {
         Upload the four ASAP exports to refresh all dashboard data.
         Files may be real XLSX or HTML-disguised-as-XLS.
       </p>
+
+      {lastUpload && <LastUpload row={lastUpload} />}
 
       <div className="upload-form">
         <ReportSection
@@ -149,6 +166,33 @@ export default function Upload() {
             <div ref={logEndRef} />
           </div>
         </div>
+      )}
+    </div>
+  )
+}
+
+// Shows when data last landed, so staff know how fresh it is before running a
+// recurring report off it.
+function LastUpload({ row }) {
+  const when = new Date(row.uploaded_at).toLocaleString(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  })
+
+  const counts = [
+    row.student_count        && `${row.student_count.toLocaleString()} students`,
+    row.event_count          && `${row.event_count.toLocaleString()} events`,
+    row.enrollment_count     && `${row.enrollment_count.toLocaleString()} enrollments`,
+    row.class_schedule_count && `${row.class_schedule_count.toLocaleString()} class schedule rows`,
+  ].filter(Boolean)
+
+  return (
+    <div className="last-upload">
+      <strong>Last upload:</strong> {when}
+      {row.files?.length > 0 && <> &middot; {row.files.join(', ')}</>}
+      {counts.length > 0 && <div className="last-upload-detail">{counts.join(' \u00b7 ')}</div>}
+      {row.time_periods?.length > 0 && (
+        <div className="last-upload-detail">Quarters replaced: {row.time_periods.join(', ')}</div>
       )}
     </div>
   )
