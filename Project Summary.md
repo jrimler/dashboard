@@ -221,6 +221,7 @@ scripts/                     Local analysis tooling (Node, service_role key) —
   enrollment-trends-check.mjs  Verifies Enrollment Trends the same way — extracts its pure-logic block and reconciles every quarter bucket against live data
   sliding-trend.mjs          Ad-hoc: sliding-scale (Child* discount) enrollment trend over time
   teen-jazz-list.mjs         Ad-hoc: lists the unique Teen Jazz Orchestra students LIYP counts for a fiscal year, to reconcile the count by hand (prints names — keep output local)
+  mission-group-classes-review.mjs  Ad-hoc: every figure in the one-time FY25–FY26 review of Mission fee-based group classes (enrollments, students, sections, departments, new vs returning) — same filter as the Enrollment page's Mission "Fee Based — Group Classes" row
   enrollment-narrative-check.mjs  Verifies Enrollment Narrative by extracting every figure from the generated prose and reconciling it against an independent count
   quarter-audit.mjs          Pre-report sanity check for ONE uploaded quarter — run it after every upload (see After an upload below)
   screenshot.mjs             Headless-browser visual check: starts the dev server, logs in, asserts the page rendered, writes screenshots/ (see Seeing the app below)
