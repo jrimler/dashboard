@@ -7,6 +7,10 @@ dist/
 *.xls
 *.xlsx
 
+# Sample exports for schema design (all six ASAP reports, some as .csv) —
+# contain student contact info, never commit
+samples/
+
 # Playwright screenshots from scripts/screenshot.mjs — local visual checks, not artifacts
 screenshots/
 
