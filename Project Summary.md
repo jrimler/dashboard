@@ -36,7 +36,7 @@ All URLs are relative to `app.asapconnected.com`. The Upload page shows the full
 
 **SUPER:** `Course Name`, `Fiscal Year`, `Primary Instructor`, `Location`, `Facility`, `Department`, `Activity Type`, `Class Start Date`, `Class End Date`, `Lesson Duration`, `All Meetings`, `Studentid`, `Event ID`, `Event Enrollment ID`, `Time Period`
 
-**STUDENT:** `Customer ID`, `First Name`, `Last Name`, `Birthdate`, `Customer Account Created Date`, `Gender`, `Gender1`, `Ethnicity`, `Ethnicity1`, `Ethnicity Info`, `Household Income - CMC funders ask for this inform`, `Household Income - CMC s funders ask for this info`, `Pronouns`
+**STUDENT:** `Customer ID`, `First Name`, `Last Name`, `Birthdate`, `Customer Account Created Date`, `Gender`, `Gender1`, `Ethnicity`, `Ethnicity1`, `Ethnicity Info`, `Gross Household Income - CMC s funders ask for thi`, `Household Income - CMC s funders ask for this info`, `Household Income - CMC funders ask for this inform`, `Pronouns` (the three income headers are listed in `INCOME_COLUMNS`, `src/utils/householdIncome.js`)
 
 **CLASS SCHEDULE:** `Class ID` (→ `event_id`), `Facility`, `Days Of Week`, `Start Time`, `End Time`, `Age Min`, `Age Max`, `Course ID`
 
@@ -56,7 +56,7 @@ Primary key: `customer_id`
 | `account_created_date` | timestamptz | |
 | `gender` | text | Coalesce: `Gender1` wins over `Gender`; legacy single-letter codes normalized (M→Male, F→Female, N→Nonbinary/Gender Nonconforming/Genderqueer, D→Decline to State) |
 | `ethnicity` | text | Coalesce: `Ethnicity` > `Ethnicity1` > `Ethnicity Info` (matches ASAP standard reporting — the original `Ethnicity` column wins) |
-| `household_income` | text | Coalesce: newer column name wins |
+| `household_income` | text | Coalesce over `INCOME_COLUMNS`, newest header first: `Gross Household Income…` > `Household Income - CMC s funders…` > `Household Income - CMC funders…`. Stored raw; `INCOME_MAP` classifies at report time |
 
 Coalescing takes the first **real** value: whitespace-only cells and literal `"0"` (ASAP's empty-cell placeholders) are treated as null, so a blank-looking high-priority column can't shadow an actual answer in a lower-priority one. (Before this fix, roughly a third of students had a demographic field silently blanked.)
 | `pronouns` | text | |
@@ -140,7 +140,8 @@ This is the **only** record of when data landed: every other table is upserted i
 7. Enrollments with no matching `customer_id` in the parsed student data are skipped with a logged warning to avoid FK violations
 8. `location` is `.trim()`-ed on ingest (Richmond source data has trailing spaces)
 9. CLASS SCHEDULE is upserted last (after enrollments) because `class_schedule.event_id` FK references `events`
-10. After every upsert succeeds, one row is written to `upload_log` recording the timestamp, which files were included, per-table row counts, and the quarters replaced
+10. STUDENT uploads log two warnings (non-fatal) for ASAP relabelling: any header containing "income" that isn't in `INCOME_COLUMNS` (a renamed question — its answers are **not** imported until the header is added), and any stored income answer missing from `INCOME_MAP` (imported, but reports it as No Response until classified)
+11. After every upsert succeeds, one row is written to `upload_log` recording the timestamp, which files were included, per-table row counts, and the quarters replaced
 
 **Student uploads are last-write-wins** per `customer_id`: when re-uploading multiple STUDENT reports, go oldest → newest so the most recent demographics survive.
 
@@ -189,6 +190,7 @@ src/
     supabase.js              Supabase client (reads VITE_ env vars, throws if missing)
   utils/
     uploadReports.js         Full upload + upsert pipeline (parse → join → upsert)
+    householdIncome.js       STUDENT income column list (newest first) + rename / unmapped-bracket detection; importable from Node
     periodUtils.js           Period sorting, parsing, label formatting, sort keys
     fetchAll.js              Paginated Supabase reads — pages issued in parallel, stable ORDER BY required (see Performance below)
   pages/
@@ -223,6 +225,7 @@ scripts/                     Local analysis tooling (Node, service_role key) —
   teen-jazz-list.mjs         Ad-hoc: lists the unique Teen Jazz Orchestra students LIYP counts for a fiscal year, to reconcile the count by hand (prints names — keep output local)
   mission-group-classes-review.mjs  Ad-hoc: every figure in the one-time FY25–FY26 review of Mission fee-based group classes (enrollments, students, sections, departments, new vs returning) — same filter as the Enrollment page's Mission "Fee Based — Group Classes" row
   enrollment-narrative-check.mjs  Verifies Enrollment Narrative by extracting every figure from the generated prose and reconciling it against an independent count
+  student-income-check.mjs   Run on a STUDENT export before uploading it: which income column each answer comes from (reconciled to the row count), unrecognised income headers, brackets missing from INCOME_MAP, and how stored income would change (gain / change / lose / unchanged / new). Counts only, no names
   quarter-audit.mjs          Pre-report sanity check for ONE uploaded quarter — run it after every upload (see After an upload below)
   screenshot.mjs             Headless-browser visual check: starts the dev server, logs in, asserts the page rendered, writes screenshots/ (see Seeing the app below)
 supabase/
@@ -683,4 +686,6 @@ The completeness check compares against the same quarter one year earlier: if la
 | Overlapping fetches rendering a stale result | Fixed (August 2026) | Clicking FY pills / switching periods in quick succession started overlapping paginated fetches; an earlier one resolving last overwrote the newer result, so a just-added year rendered as **0 students**. Reproduced in a headless browser on Neighborhood Choir (FY26 showed 0 instead of 405) and originally found on LIYP (FY26 0 instead of 354). A `loadSeq` ref now lets only the newest fetch commit, in **LIYP, Neighborhood Choir and Demographics**; clearing the selection bumps the sequence too, so an in-flight fetch can't repopulate emptied tables. Demographics got the same guard defensively — its narrower single-select window did not reproduce. Enrollment Trends is unaffected (one fetch on mount) |
 | Grant income figures that are true but circular | By design (August 2026) | LIYP's Sliding-Scale group reports **100.0% Low income every year** — qualifying for a sliding-scale or Merit discount *is* an income test, so the breakdown restates the group definition. Shipped because funders ask for it, but the About panel says so outright and points at YMP (97.6% → 88.9% FY23–FY26) as the group with real variation |
 | Gender thinly answered in the LIYP youth cohorts | Accepted / surfaced (August 2026) | `No Response` is 48–61% of the Sliding-Scale group and ~50–55% of Combined across FY23–FY26 — far worse than ethnicity in the same cohorts. Not fixable in the dashboard (it is a collection problem), so the per-year percentage base sits on each dimension's section header row and the About panel names the counts |
+| Household income column renamed in ASAP | Fixed in code (October 2026); **needs STUDENT re-upload** | ASAP renamed `Household Income - CMC s funders ask for this info` to `Gross Household Income - CMC s funders ask for thi`. The upload matched headers exactly, so every answer under the new name was dropped without a warning. In a Fall 2026 Student export, 1,030 of 1,908 students had their answer only under the new name; **879 had no income stored at all**. Now read via `INCOME_COLUMNS`, and any unrecognised income header is a logged upload warning. Re-uploading that export would move those students: 490 No Response → Low, 287 → Decline to State, 51 → High, 51 stay No Response (unclassified brackets, next row); 19 Decline → Low, 15 Low → Decline, 4 Low → High. No student loses a stored answer. Verified with `scripts/student-income-check.mjs` (sources 1,030 + 0 + 392 + 486 no answer = 1,908) |
+| New income brackets `$116,040 - $168,100`, `Above $168,100` | **Open — awaiting threshold decision** | They arrived with the renamed column (18 and 45 students in the Fall 2026 export) and aren't in `INCOME_MAP`, so they report as No Response. The existing scale puts `$116,040 - $154,700` in Low and `Above $154,700` in High; the classification is waiting on CMC's low-income cutoff. Uploads now warn about them |
 | Tables readable only by `authenticated` role (anon/service_role denied) | Fixed (July 2026) | One-time `GRANT SELECT ... TO service_role` in Supabase SQL editor enables local `scripts/` querying; service_role key kept in gitignored `.env` |

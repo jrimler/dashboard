@@ -1,5 +1,6 @@
 import * as XLSX from 'xlsx'
 import { supabase } from '../lib/supabase'
+import { householdIncome, unknownIncomeColumns, unmappedIncomeValues } from './householdIncome'
 
 // ---------------------------------------------------------------------------
 // Parsing
@@ -184,12 +185,13 @@ export async function uploadReports(regularFile, superFile, studentFile, log, cl
 
   if (studentFile) {
     log('Building student records...')
+    const strayIncome = unknownIncomeColumns(Object.keys(studentRows[0] ?? {}))
+    if (strayIncome.length > 0) {
+      log(`WARNING: unrecognised income column(s), NOT imported: ${strayIncome.map(h => JSON.stringify(h)).join(', ')}. ASAP has probably renamed the question — add the new header to INCOME_COLUMNS in src/utils/householdIncome.js and re-upload, or those answers are lost.`)
+    }
     for (const row of studentRows) {
       const customerId = String(row['Customer ID'] ?? '').trim()
       if (!customerId) continue
-
-      const hIncome1 = row['Household Income - CMC funders ask for this inform']
-      const hIncome2 = row['Household Income - CMC s funders ask for this info']
 
       studentsMap[customerId] = {
         customer_id:          customerId,
@@ -203,9 +205,13 @@ export async function uploadReports(regularFile, superFile, studentFile, log, cl
         // Ethnicity precedence matches ASAP's standard reporting: the original
         // "Ethnicity" column wins, then "Ethnicity1", then "Ethnicity Info".
         ethnicity:            coalesce(row['Ethnicity'], row['Ethnicity1'], row['Ethnicity Info']),
-        household_income:     coalesce(hIncome2, hIncome1),
+        household_income:     householdIncome(row),
         pronouns:             row['Pronouns'] ?? null,
       }
+    }
+    const unmapped = unmappedIncomeValues(Object.values(studentsMap).map(s => s.household_income))
+    if (unmapped.length > 0) {
+      log(`WARNING: income answers not in INCOME_MAP (they import, but report as No Response until classified in src/reports/demographicCategories.js): ${unmapped.map(([v, n]) => `${JSON.stringify(v)} (${n})`).join(', ')}`)
     }
   }
 
