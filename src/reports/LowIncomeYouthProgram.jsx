@@ -625,7 +625,7 @@ export default function LowIncomeYouthProgram() {
             </p>
             <p>
               <strong>Read income against its base.</strong> The base is narrow in these cohorts and
-              varies a lot by group — in FY26 it was 110 of 220 Sliding-Scale students but only 9 of
+              varies a lot by group — in FY26 it was 134 of 220 Sliding-Scale students but only 9 of
               34 Children's Chorus students. A "100.0% Low" cell means 100% of the students who named
               a bracket, not 100% of the group. Note too that the Sliding-Scale figure is close to
               circular: qualifying for a sliding-scale or Merit discount is itself an income test, so
