@@ -446,7 +446,8 @@ export default function NeighborhoodChoirDemographics() {
             </p>
             <p>
               <strong>Household income</strong> maps ASAP's bracket labels to High, Low, or Decline to
-              State through an explicit lookup table. ASAP has changed those labels several times, so
+              State through an explicit lookup table. CMC's cutoff: only <em>Above $168,100</em> is
+              High; every other bracket is Low. ASAP has changed those labels several times, so
               a bracket not yet in the table lands in No Response rather than disappearing — a jump in
               No Response is the signal to update the table. The <strong>Low</strong> row is the
               low-income figure.
@@ -473,7 +474,8 @@ export default function NeighborhoodChoirDemographics() {
               in this program — 83 students in FY23, 159 in FY26 — and on the old base (which counted
               decliners in the denominator) that alone made the low-income share appear to fall from
               70.7% to 56.1%. On the current base the picture is the true one: essentially every choir
-              student who names an income bracket names a low one, 99–100% in all four years on file.
+              student who names an income bracket names a low one — 100% in every year on file since
+              the $168,100 cutoff (October 2026), which made the few Above $154,700 answers Low.
               Read the Low percentage as "of those who told us", and check the Decline to State and No
               Response counts alongside it to see how much of the program that percentage speaks for.
             </p>

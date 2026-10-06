@@ -629,8 +629,10 @@ export default function LowIncomeYouthProgram() {
               34 Children's Chorus students. A "100.0% Low" cell means 100% of the students who named
               a bracket, not 100% of the group. Note too that the Sliding-Scale figure is close to
               circular: qualifying for a sliding-scale or Merit discount is itself an income test, so
-              that group reports 100.0% Low in every year on file. YMP is the group with real
-              variation (97.6% → 93.9% → 91.3% → 88.9% across FY23–FY26).
+              that group reports 100.0% Low in every year on file. Under CMC's cutoff — only{' '}
+              <em>Above $168,100</em> is High, every other bracket Low — every group read 100.0% Low
+              in every year when the cutoff was adopted (October 2026), so the income table mostly
+              tells you how many students answered, not how their incomes differ.
             </p>
             <p>
               <strong>Gender is thinly answered in these cohorts</strong> — far more thinly than

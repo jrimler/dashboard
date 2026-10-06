@@ -592,7 +592,8 @@ export default function Demographics() {
           and Native Hawaiian to Native Hawaiian or Other Pacific Islander; the trans and
           gender-nonconforming variants each to one category). <strong>Household income</strong> is
           mapped from ASAP's bracket labels to High, Low, or Decline to State through an explicit
-          lookup table; ASAP has changed those labels several times, so any bracket not yet in the
+          lookup table. CMC's cutoff: only <em>Above $168,100</em> is High; every other bracket is
+          Low. ASAP has changed those labels several times, so any bracket not yet in the
           table lands in No Response rather than disappearing. <strong>Export CSV</strong> gives one
           flat file: a row per unit (Total, Lessons, Group Classes, then each class) with count and %
           columns for every bucket.

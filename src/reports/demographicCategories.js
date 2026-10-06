@@ -13,8 +13,15 @@ export const NO_RESPONSE = 'No Response'
 // case-insensitively, trimmed) to a reporting category. Any label not in this
 // map falls to "No Response" — this map must be updated when ASAP introduces
 // new income labels.
+//
+// CMC's cutoff (October 2026): only "Above $168,100" is High; every other
+// bracket is Low. That moved "Above $154,700" from High to Low — it was the top
+// bracket of an earlier scale, but sits below the cutoff — and with it every
+// year's High count.
 export const INCOME_MAP = {
-  'above $154,700':        'High',
+  'above $168,100':        'High',
+  '$116,040 - $168,100':   'Low',
+  'above $154,700':        'Low',
   'below $60,600':         'Low',
   'below $58,000':         'Low',
   'below $60,000':         'Low',
