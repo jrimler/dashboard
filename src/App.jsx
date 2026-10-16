@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { NavLink, Routes, Route, Navigate, useNavigate } from 'react-router-dom'
-import { supabase } from './lib/supabase'
+import { supabase, authLinkType } from './lib/supabase'
 import Upload               from './pages/Upload'
 import Enrollment           from './pages/Enrollment'
 import Retention            from './pages/Retention'
@@ -8,6 +8,7 @@ import Classes              from './pages/Classes'
 import SpecializedReporting from './pages/SpecializedReporting'
 import ReportDetail         from './pages/ReportDetail'
 import Login                from './pages/Login'
+import SetPassword          from './pages/SetPassword'
 
 const NAV_ITEMS = [
   { to: '/reports',    label: 'Reports'         },
@@ -21,10 +22,15 @@ export default function App() {
   const [session, setSession] = useState(undefined) // undefined = loading
   const navigate = useNavigate()
   const didInitialRedirect = useRef(false)
+  // Arrived via a reset/invite link: signed in, but no password chosen yet.
+  // Seeded from the URL fragment because the PASSWORD_RECOVERY event can fire
+  // during client start-up, before this component subscribes.
+  const [mustSetPassword, setMustSetPassword] = useState(authLinkType !== null)
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session ?? null))
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'PASSWORD_RECOVERY') setMustSetPassword(true)
       setSession(session ?? null)
     })
     return () => subscription.unsubscribe()
@@ -44,6 +50,10 @@ export default function App() {
   if (session === undefined) return null
 
   if (!session) return <Login />
+
+  if (mustSetPassword) {
+    return <SetPassword isInvite={authLinkType === 'invite'} onDone={() => setMustSetPassword(false)} />
+  }
 
   return (
     <div className="layout">

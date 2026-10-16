@@ -1030,6 +1030,25 @@
 
 .login-form .btn-primary { width: 100%; text-align: center; align-self: stretch; margin-top: 4px; }
 
+.login-link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--color-muted);
+  font-size: 13px;
+  cursor: pointer;
+  align-self: center;
+}
+.login-link:hover { color: var(--color-accent); text-decoration: underline; }
+
+.login-notice {
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background: var(--color-success-lt);
+  color: var(--color-success);
+  font-size: 13px;
+}
+
 /* ── Demographics report ── */
 .demo-total-block { margin-bottom: 28px; }
 
