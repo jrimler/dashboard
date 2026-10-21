@@ -1,9 +1,7 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { supabase, authLinkError } from '../lib/supabase'
 
 export default function Login() {
-  const navigate = useNavigate()
   const [mode, setMode]         = useState('signin') // 'signin' | 'forgot'
   const [email, setEmail]       = useState('')
   const [password, setPassword] = useState('')
@@ -23,9 +21,9 @@ export default function Login() {
     if (err) {
       setError('Invalid email or password.')
       setLoading(false)
-    } else {
-      navigate('/reports', { replace: true })
     }
+    // On success, App's onAuthStateChange listener swaps in the layout at the
+    // current URL, so a deep link survives the sign-in.
   }
 
   async function handleForgot(e) {

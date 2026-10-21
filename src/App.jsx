@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { NavLink, Routes, Route, Navigate, useNavigate } from 'react-router-dom'
+import { NavLink, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom'
 import { supabase, authLinkType } from './lib/supabase'
 import Upload               from './pages/Upload'
 import Enrollment           from './pages/Enrollment'
@@ -21,6 +21,7 @@ const NAV_ITEMS = [
 export default function App() {
   const [session, setSession] = useState(undefined) // undefined = loading
   const navigate = useNavigate()
+  const location = useLocation()
   const didInitialRedirect = useRef(false)
   // Arrived via a reset/invite link: signed in, but no password chosen yet.
   // Seeded from the URL fragment because the PASSWORD_RECOVERY event can fire
@@ -36,15 +37,17 @@ export default function App() {
     return () => subscription.unsubscribe()
   }, [])
 
-  // On the first authenticated load, always land on Reports regardless of the
-  // entry URL (e.g. a bookmarked /upload or a browser-restored tab). Runs once
-  // per app load, so navigating to Upload later in the session still works.
+  // Deep links (e.g. /reports/enrollment-trends) are honored on first load,
+  // including after signing in from one. The one exception is Upload: a
+  // bookmarked or browser-restored /upload tab should open on Reports, not on
+  // the page that writes to the database. Runs once per app load, so
+  // navigating to Upload later in the session still works.
   useEffect(() => {
     if (session && !didInitialRedirect.current) {
       didInitialRedirect.current = true
-      navigate('/reports', { replace: true })
+      if (location.pathname === '/upload') navigate('/reports', { replace: true })
     }
-  }, [session, navigate])
+  }, [session, navigate, location.pathname])
 
   // Still resolving session — render nothing to avoid flash
   if (session === undefined) return null
@@ -92,6 +95,7 @@ export default function App() {
           <Route path="/classes"    element={<Classes />} />
           <Route path="/reports"    element={<SpecializedReporting />} />
           <Route path="/reports/:reportId" element={<ReportDetail />} />
+          <Route path="*"           element={<Navigate to="/reports" replace />} />
         </Routes>
       </main>
     </div>
