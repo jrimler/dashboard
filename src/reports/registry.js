@@ -7,10 +7,17 @@ import DiscountTrends from './DiscountTrends'
 import NeighborhoodChoirDemographics from './NeighborhoodChoirDemographics'
 import EnrollmentTrends from './EnrollmentTrends'
 import EnrollmentNarrative from './EnrollmentNarrative'
+import DataArtsReport from './DataArtsReport'
 
 // Order here is the order the cards appear on the Reports page — keep it
 // alphabetical by label so a growing list stays easy to scan.
 export const REPORTS = [
+  {
+    id:          'data-arts',
+    label:       'Data Arts Report',
+    description: 'The yearly Data Arts submission for one fiscal year — online vs on-site, partner stats, group classes, private lessons, participation, and attendees 18 and under. Combines ASAP data with the Data Arts Input figures.',
+    component:   DataArtsReport,
+  },
   {
     id:          'demographics',
     label:       'Demographics',

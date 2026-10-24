@@ -128,7 +128,7 @@ console.log('Logged in.')
 // Navigate the way a person does — through the UI — which also exercises the
 // real routing rather than a cold boot the app never intends to serve.
 async function navigateInApp(target) {
-  const SIDEBAR = { '/reports': 'Reports', '/enrollment': 'Enrollment', '/retention': 'Retention', '/classes': 'Classes', '/upload': 'Upload' }
+  const SIDEBAR = { '/reports': 'Reports', '/enrollment': 'Enrollment', '/retention': 'Retention', '/classes': 'Classes', '/data-arts-input': 'Data Arts Input', '/upload': 'Upload' }
 
   if (SIDEBAR[target]) {
     await page.click(`.sidebar-nav >> text="${SIDEBAR[target]}"`)
@@ -151,6 +151,14 @@ async function navigateInApp(target) {
 console.log(`Navigating to ${route}…`)
 const t0 = Date.now()
 await navigateInApp(route)
+
+// The Data Arts Report shows nothing until a year is picked; FY26 is the first
+// year it reports, and Details holds the lesson and camp tables.
+if (route.includes('/reports/data-arts')) {
+  await page.click('.period-pill >> text="FY26"')
+  await page.waitForSelector('.liyp-group-card', { timeout: 90000 })
+  await page.click('text=/^Details/')
+}
 
 // Reports fetch after mount; wait for the loading placeholder to clear.
 //

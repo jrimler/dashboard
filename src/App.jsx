@@ -5,6 +5,7 @@ import Upload               from './pages/Upload'
 import Enrollment           from './pages/Enrollment'
 import Retention            from './pages/Retention'
 import Classes              from './pages/Classes'
+import DataArtsInput        from './pages/DataArtsInput'
 import SpecializedReporting from './pages/SpecializedReporting'
 import ReportDetail         from './pages/ReportDetail'
 import Login                from './pages/Login'
@@ -15,6 +16,7 @@ const NAV_ITEMS = [
   { to: '/enrollment', label: 'Enrollment'      },
   { to: '/retention',  label: 'Retention'       },
   { to: '/classes',    label: 'Classes'         },
+  { to: '/data-arts-input', label: 'Data Arts Input' },
   { to: '/upload',     label: 'Upload'          },
 ]
 
@@ -93,6 +95,7 @@ export default function App() {
           <Route path="/enrollment" element={<Enrollment />} />
           <Route path="/retention"  element={<Retention />} />
           <Route path="/classes"    element={<Classes />} />
+          <Route path="/data-arts-input" element={<DataArtsInput />} />
           <Route path="/reports"    element={<SpecializedReporting />} />
           <Route path="/reports/:reportId" element={<ReportDetail />} />
           <Route path="*"           element={<Navigate to="/reports" replace />} />

@@ -127,6 +127,24 @@ Primary key: `id` (identity). One row per completed upload run — added in migr
 
 This is the **only** record of when data landed: every other table is upserted in place, so an overwritten row leaves no trace of the upload that wrote it. The row is written after all upserts succeed, so its presence means the data is committed. A failed log write is non-fatal — it emits a warning in the upload log rather than reporting the upload itself as failed, since the data is already in by that point.
 
+### `data_arts_input`
+Primary key: `fiscal_year`. One row per fiscal year — added in migration 005. The only table written from the browser rather than by the upload pipeline: partner-program and audience figures that ASAP doesn't hold, entered on the **Data Arts Input** page and read by the **Data Arts Report**.
+
+| Field | Type | Notes |
+|---|---|---|
+| `fiscal_year` | text PK | `FY26` form, checked by constraint |
+| `partner_schools` | integer | |
+| `partner_classes` | integer | distinct partner classes |
+| `partner_times_offered` | integer | |
+| `partner_students` | integer | counted as free students, and as 18 and under, in the report |
+| `partner_instruction_hours` | numeric | may be fractional |
+| `paid_audience` | integer | |
+| `free_audience` | integer | |
+| `updated_at` | timestamptz | set on every save |
+| `updated_by` | text | email of whoever last saved |
+
+All figures are nullable and `>= 0`. **Null means "not entered", never 0**: the report withholds any total that depends on a null field. Saving a year again overwrites its row (upsert on `fiscal_year`) — provisional until the upsert rules are settled. RLS is enabled with select/insert/update policies for `authenticated`; anon has no access; `service_role` gets `SELECT` for the check scripts. Field labels and column names live once in `src/utils/dataArtsInput.js`, shared by the form and the report. Until migration 005 is applied both pages say so (PostgREST `PGRST205` / `42P01`) instead of erroring.
+
 ---
 
 ## Upload Pipeline (`src/utils/uploadReports.js`)
@@ -193,6 +211,7 @@ src/
     householdIncome.js       STUDENT income column list (newest first) + rename / unmapped-bracket detection; importable from Node
     periodUtils.js           Period sorting, parsing, label formatting, sort keys
     fetchAll.js              Paginated Supabase reads — pages issued in parallel, stable ORDER BY required (see Performance below)
+    dataArtsInput.js         data_arts_input field definitions, loader, FY-range helpers — shared by the input page and the Data Arts Report
   pages/
     Login.jsx                Email/password login screen (shown when no session) + "Forgot password?" reset request
     SetPassword.jsx          Choose-a-password screen shown after a reset or invite link
@@ -200,10 +219,12 @@ src/
     Enrollment.jsx           Working — see below
     Retention.jsx            Working — see below
     Classes.jsx              Working — see below
+    DataArtsInput.jsx        Yearly partner-program + audience figures form at /data-arts-input — see below
     SpecializedReporting.jsx Report gallery at /reports — cards from the REPORTS registry; see below
     ReportDetail.jsx         Renders one report at /reports/:reportId (looks it up in the registry)
   reports/
     registry.js                     REPORTS array — id/label/description/component for each report; drives the gallery + routing
+    DataArtsReport.jsx              Specialized report — see below
     demographicCategories.js        Shared income/ethnicity/gender category definitions (see below)
     PianoInspiresGrant.jsx          Specialized report — see below
     UniqueGroupClassesBoard.jsx     Specialized report — see below
@@ -227,6 +248,7 @@ scripts/                     Local analysis tooling (Node, service_role key) —
   mission-group-classes-review.mjs  Ad-hoc: every figure in the one-time FY25–FY26 review of Mission fee-based group classes (enrollments, students, sections, departments, new vs returning) — same filter as the Enrollment page's Mission "Fee Based — Group Classes" row
   enrollment-narrative-check.mjs  Verifies Enrollment Narrative by extracting every figure from the generated prose and reconciling it against an independent count
   student-income-check.mjs   Run on a STUDENT export before uploading it: which income column each answer comes from (reconciled to the row count), unrecognised income headers, brackets missing from INCOME_MAP, and how stored income would change (gain / change / lose / unchanged / new). Counts only, no names
+  data-arts-check.mjs        Verifies the Data Arts Report: extracts its pure-logic block, reconciles every section against independent counts, and exercises the Data Arts Input combining rules with a synthetic row. `node scripts/data-arts-check.mjs [FY26]`
   quarter-audit.mjs          Pre-report sanity check for ONE uploaded quarter — run it after every upload (see After an upload below)
   screenshot.mjs             Headless-browser visual check: starts the dev server, logs in, asserts the page rendered, writes screenshots/ (see Seeing the app below)
 supabase/
@@ -235,6 +257,7 @@ supabase/
     002_class_schedule.sql   class_schedule table + index (FK → events)
     003_grant_delete_enrollments.sql   DELETE grant for replace-by-quarter uploads
     004_upload_log.sql       upload_log table + index + grants (records when each upload happened)
+    005_data_arts_input.sql  data_arts_input table + RLS policies + grants (yearly figures entered in the app)
 CLAUDE.md                    Working agreement: ship-every-change workflow, verification rules, ASAP gotchas
 netlify.toml                 SPA redirect (/* → /index.html)
 .env.example                 Env var template
@@ -243,7 +266,7 @@ netlify.toml                 SPA redirect (/* → /index.html)
 **Local data tooling:** `scripts/db.mjs` / `scripts/query.mjs` let a developer query the live Supabase DB from the command line using a `service_role` key in `.env` (gitignored). This required a one-time `GRANT SELECT ... TO service_role` in the Supabase SQL editor — the tables were originally readable only by the `authenticated` role, so the app worked but scripts (and the anon key) got "permission denied." The key bypasses Row Level Security, so these files must never be imported into browser code.
 
 ### Sidebar nav order
-Reports → Enrollment → Retention → Classes → Upload
+Reports → Enrollment → Retention → Classes → Data Arts Input → Upload
 
 ---
 
@@ -363,11 +386,46 @@ Continuing is shown as `—` if the preceding quarter has no data in the DB, or 
 
 ---
 
+### Data Arts Input (`/data-arts-input`)
+
+Form for the figures the Data Arts Report needs that ASAP doesn't record — CMC's off-site partner programs (school district and elsewhere) and event audiences, collected by program managers and entered once per fiscal year. Fields: partner schools, distinct classes, times offered, students, hours of instruction; paid and free audience members. Stored in `data_arts_input` (see schema).
+
+- **The year being entered is unmissable:** a fiscal-year dropdown (FY26 through the FY in progress, July 1 turnover, each labelled with its quarters — "FY26 (Summer 2025 – Spring 2026)") and a highlighted banner naming the year, when it was last saved and by whom. Defaults to the most recently *closed* year, since that's the one being reported on.
+- Every field is optional so a year can be filled in as figures arrive; blank saves as null ("not entered") and the report treats it as missing, not 0. Typed values must be ≥ 0, whole numbers except hours; commas are accepted.
+- **Save** upserts that year's row (overwriting it) and records `updated_by` / `updated_at`. Switching years discards unsaved edits; a `loadSeq` guard stops a slow fetch for one year filling the form while another is selected — otherwise one year's figures could be saved under another.
+
+---
+
 ### Specialized Reporting (`/reports` + `/reports/:reportId`)
 
 `/reports` (`SpecializedReporting.jsx`) is a **gallery** of report cards — one button per entry in the `REPORTS` array (`src/reports/registry.js`), each showing the report's label and description. Clicking a card navigates to `/reports/:reportId`, where `ReportDetail.jsx` looks the id up in the registry and renders that report's component (redirecting to `/reports` if the id is unknown).
 
 Adding a new report requires only: create the component in `src/reports/`, then add an `{ id, label, description, component }` entry to the `REPORTS` array in `registry.js`. Report order in the gallery follows array order, and the array is kept alphabetical by label — insert a new entry in its alphabetical slot.
+
+---
+
+#### Data Arts Report
+
+The yearly Data Arts submission for **one fiscal year** (single-select FY pills, FY26 through the newest FY on file — never by quarter, never years combined; earlier years are not run). Combines the uploaded ASAP data with that year's **Data Arts Input** row. Each table carries a **Source** column: ASAP, Data Arts Input, or Combined. A blank input field shows `—` with *Needs Data Arts Input*, and so does every total that needs it — a partial total is withheld rather than shown understated. A warning banner says whether the year's input exists, when it was saved, and which fields are still blank, with a link to the input page.
+
+Sections, in the order Data Arts asks for them:
+
+| Section | Rule |
+|---|---|
+| **Online vs Physical Classes** | Private lessons per **enrollment**, group classes per **section** (event ID). Online = ASAP location *or* facility contains "virtual" (in practice the facility: "Virtual Music Studio", "<Teacher> Virtual Studio"); all else on-site. FY26: online 171 (170 lessons + 1 class), on-site 4,457 (4,056 + 401) |
+| **Partner Stats** | The seven input fields as entered |
+| **Number of Group Classes** | *Distinct classes* = CLASS sections (unique class IDs). *Times offered* = sum of ASAP `all_meetings` per section — **not** weeks between start and end dates, which disagree wherever a holiday falls (Mariachi CMC Fall = 14). **Camps** (course name matching `/\bcamp/i` — Camp CMC, CMC Sparks Camp, Campamento CMC…) count **weekdays Mon–Fri from start to end date** instead, because ASAP's camp meeting counts aren't reliable (FY26 Camp CMC ran Mon–Fri, records 1 meeting). FY26: 402 classes (395 + 7 camps), 4,671 times offered (4,637 meetings + 34 camp days) |
+| **Number of Private Lessons** | Sum over lesson enrollments of the lesson's `all_meetings` (every FY26 lesson event holds exactly one enrollment), i.e. actual lessons booked, not a nominal term length. FY26: 45,453 lessons over 4,226 enrollments; 5 enrollments have no meeting count and add 0 (named in a note) |
+| **Attendance / Participation (all ages)** | Free students = tuition-free enrollments (`is_tuition_free`) + partner students; paid = fee-based enrollments; free/paid audience from input. Enrollment rows, not unique students. FY26: 2,632 tuition-free + 5,524 fee-based = 8,156 |
+| **Number of Attendees (18 and under)** | Unique CMC students aged ≤ 18 + partner students + round(60% × (paid + free audience)). Age at the start of the student's earliest class in the FY (Demographics' convention); no birthdate / placeholder / age outside 0–100 → not counted, shown in a note. FY26: 987 students ≤ 18, 75 of 2,818 un-ageable |
+
+A collapsible **Details** panel shows private lessons by branch × quarter (summing to the total) and every camp with its dates, ASAP meeting count and days counted, so the camp rule is inspectable. **Export CSV** writes every row with source and note, then both detail tables. No student names appear.
+
+**Camp rule is provisional** — identification by name and the weekday count were chosen pending CMC's confirmation. A workshop not named as a camp (e.g. the 3-day Fri–Sun *CMC Summer Jazz Workshop*, also at facility "Various") is counted by meetings.
+
+**Data loading:** one FY's `events` and `enrollments` via `fetchAll` (flat, parallel), birthdates via `fetchByIds`, plus the `data_arts_input` row. Throws rather than undercounting if any enrollment's event falls outside the FY. `loadSeq` guards against overlapping fetches.
+
+**Verification:** `node scripts/data-arts-check.mjs [FY]` — extracts the report's pure-logic block and reconciles: online + on-site against an independent nested-join fetch and the stored `is_virtual` flag (170 = 170); classes + camps = sections; class meetings against a raw sum; lessons against a nested-join sum (45,453) and the branch × quarter rows; tuition-free recomputed from raw amounts (2,632); ≤ 18 + older + unknown = unique students (2,818); the weekday counter against calendar facts; and the input-combining rules with a synthetic row (sums exact, totals withheld while a field is blank). All checks pass for FY26 and FY27.
 
 ---
 

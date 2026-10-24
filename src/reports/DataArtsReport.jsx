@@ -1,0 +1,694 @@
+import { useState, useEffect, useMemo, useRef } from 'react'
+import { Link } from 'react-router-dom'
+import { supabase } from '../lib/supabase'
+import { fetchAll, fetchByIds } from '../utils/fetchAll'
+import { classStartDate } from '../utils/periodUtils'
+import {
+  DATA_ARTS_FIELDS, FIRST_DATA_ARTS_FY,
+  loadDataArtsInput, dataArtsYearsThrough, fiscalYearSpan,
+} from '../utils/dataArtsInput'
+
+// ─── pure logic (verified by scripts/data-arts-check.mjs) ────────────────────
+
+// A lesson or class is online when ASAP's location or facility mentions
+// "virtual". In practice it's the facility ("Virtual Music Studio",
+// "<Teacher> Virtual Studio"); location is checked too so a relabel that moves
+// the word there is still caught.
+const VIRTUAL_RE = /virtual/i
+
+// Camps aren't a category in any ASAP export, so they're recognised by name:
+// "Camp CMC", "CMC Sparks Camp", "Campamento CMC"… Every match is listed on the
+// report, so a rename that slips out of (or into) the pattern is visible.
+const CAMP_RE = /\bcamp/i
+
+// Data Arts counts attendees "18 and under".
+const YOUTH_MAX_AGE = 18
+
+// CMC's estimate of the share of its audiences that are 18 or under.
+const AUDIENCE_YOUTH_SHARE = 0.6
+
+// ASAP writes a 1900-01-01 placeholder when a birthdate is missing (age ~126).
+const MAX_PLAUSIBLE_AGE = 100
+
+function isVirtual(ev) {
+  return VIRTUAL_RE.test(ev?.location ?? '') || VIRTUAL_RE.test(ev?.facility ?? '')
+}
+
+function isCamp(ev) {
+  return ev?.activity_type === 'CLASS' && CAMP_RE.test(ev.course_name ?? '')
+}
+
+// Mon–Fri days from start to end inclusive, "YYYY-MM-DD" strings. A camp's
+// meeting count in ASAP can't be trusted — Camp CMC (FY26) ran Mon–Fri but
+// records 1 meeting — so camp days come from its dates instead.
+function weekdaysBetween(start, end) {
+  const d = new Date(start + 'T00:00:00Z'), last = new Date(end + 'T00:00:00Z')
+  let n = 0
+  while (d <= last) {
+    const dow = d.getUTCDay()
+    if (dow !== 0 && dow !== 6) n++
+    d.setUTCDate(d.getUTCDate() + 1)
+  }
+  return n
+}
+
+// null when either date is missing or a placeholder (classStartDate applies the
+// same plausibility check to an end date) — the camp is then flagged, not guessed.
+function campDays(ev) {
+  const start = classStartDate(ev.class_start_date)
+  const end   = classStartDate(ev.class_end_date)
+  if (!start || !end || end < start) return null
+  return weekdaysBetween(start, end)
+}
+
+function ageAtDate(birthdateStr, referenceDateStr) {
+  if (!birthdateStr || !referenceDateStr) return null
+  const [by, bm, bd] = birthdateStr.split('-').map(Number)
+  const [ry, rm, rd] = referenceDateStr.split('-').map(Number)
+  let age = ry - by
+  if (rm < bm || (rm === bm && rd < bd)) age--
+  return age < 0 || age > MAX_PLAUSIBLE_AGE ? null : age
+}
+
+// Splits one fiscal year's CMC students by age. Each unique student is aged at
+// the start of their earliest class in the year, the same convention as the
+// Demographics report, so someone who turns 19 mid-year still counts as 18 and
+// under. No birthdate, a placeholder one, or no real start date → unknown.
+function studentAges(enrollments, eventsById, birthdates) {
+  const earliest = new Map()   // customer_id → earliest real class start date
+  for (const e of enrollments) {
+    if (!e.customer_id) continue
+    const start = classStartDate(eventsById.get(e.event_id)?.class_start_date)
+    const cur = earliest.get(e.customer_id)
+    if (!earliest.has(e.customer_id)) earliest.set(e.customer_id, start)
+    else if (start && (!cur || start < cur)) earliest.set(e.customer_id, start)
+  }
+  let youth = 0, older = 0, unknown = 0
+  for (const [cid, start] of earliest) {
+    const age = ageAtDate(birthdates.get(cid) ?? null, start)
+    if (age === null) unknown++
+    else if (age <= YOUTH_MAX_AGE) youth++
+    else older++
+  }
+  return { total: earliest.size, youth, older, unknown }
+}
+
+function sum(values) { return values.reduce((a, b) => a + b, 0) }
+
+// A total that depends on Data Arts Input is withheld (null) while any input it
+// needs is missing — a partial figure in a funder report is worse than a gap.
+function sumIfComplete(values) {
+  return values.some(v => v == null) ? null : sum(values)
+}
+
+/**
+ * Every Data Arts figure for one fiscal year.
+ *
+ * events       events whose fiscal_year is the selected FY
+ * enrollments  enrollments whose fiscal_year is the selected FY
+ * birthdates   Map customer_id → birthdate string (or null)
+ * input        the data_arts_input row for the FY, or null
+ */
+function buildReport({ events, enrollments, birthdates, input }) {
+  const eventsById = new Map(events.map(e => [e.event_id, e]))
+  const lessonEnr  = enrollments.filter(e => eventsById.get(e.event_id)?.activity_type === 'LESSON')
+  const classes    = events.filter(e => e.activity_type === 'CLASS')
+  const camps      = classes.filter(isCamp)
+  const regular    = classes.filter(e => !isCamp(e))
+
+  // Online vs physical: private lessons are counted per enrollment, group
+  // classes per section (event ID).
+  const online = {
+    lessons: { online: lessonEnr.filter(e => isVirtual(eventsById.get(e.event_id))).length },
+    classes: { online: classes.filter(isVirtual).length },
+  }
+  online.lessons.onsite = lessonEnr.length - online.lessons.online
+  online.classes.onsite = classes.length   - online.classes.online
+
+  // Group classes: each section is one distinct class, offered once per
+  // meeting — Mariachi CMC in Fall (14), Winter and Spring is three classes and
+  // the sum of their meetings. Camps count days instead of meetings.
+  const regularNoMeetings = regular.filter(e => e.all_meetings == null)
+  const campRows = camps.map(e => ({
+    event_id:   e.event_id,
+    course:     (e.course_name ?? '').trim(),
+    instructor: e.primary_instructor ?? '',
+    start:      e.class_start_date,
+    end:        e.class_end_date,
+    meetings:   e.all_meetings,
+    days:       campDays(e),
+  })).sort((a, b) => (a.start ?? '').localeCompare(b.start ?? '') || a.course.localeCompare(b.course))
+  const groupClasses = {
+    regular: {
+      sections:     regular.length,
+      timesOffered: sum(regular.map(e => e.all_meetings ?? 0)),
+      noMeetings:   regularNoMeetings.length,
+    },
+    camps: {
+      sections: camps.length,
+      days:     sum(campRows.map(c => c.days ?? 0)),
+      noDates:  campRows.filter(c => c.days == null).length,
+      rows:     campRows,
+    },
+  }
+  groupClasses.sections     = classes.length
+  groupClasses.timesOffered = groupClasses.regular.timesOffered + groupClasses.camps.days
+
+  // Private lessons: every lesson enrollment times the lessons it was booked
+  // for in that quarter (ASAP's All Meetings on the lesson's event).
+  const byBranchQuarter = new Map()
+  let lessonsTotal = 0, lessonsNoMeetings = 0
+  for (const e of lessonEnr) {
+    const ev = eventsById.get(e.event_id)
+    const meetings = ev.all_meetings
+    if (meetings == null) lessonsNoMeetings++
+    lessonsTotal += meetings ?? 0
+    const key = `${(ev.location ?? '').trim() || '—'}|${ev.time_period ?? '—'}`
+    const b = byBranchQuarter.get(key) ?? { location: (ev.location ?? '').trim() || '—', time_period: ev.time_period ?? '—', enrollments: 0, lessons: 0, start: null }
+    b.enrollments++
+    b.lessons += meetings ?? 0
+    const start = classStartDate(ev.class_start_date)
+    if (start && (!b.start || start < b.start)) b.start = start
+    byBranchQuarter.set(key, b)
+  }
+  const privateLessons = {
+    enrollments: lessonEnr.length,
+    lessons:     lessonsTotal,
+    noMeetings:  lessonsNoMeetings,
+    byBranchQuarter: [...byBranchQuarter.values()]
+      .sort((a, b) => a.location.localeCompare(b.location) || (a.start ?? '').localeCompare(b.start ?? '')),
+  }
+
+  // Attendance / participation, all ages. Enrollments, not unique students.
+  const tuitionFree = enrollments.filter(e => e.is_tuition_free === true).length
+  const feeBased    = enrollments.filter(e => e.is_tuition_free === false).length
+  const val = key => (input?.[key] == null ? null : Number(input[key]))
+  const participation = {
+    tuitionFree,
+    feeBased,
+    unclassified: enrollments.length - tuitionFree - feeBased,
+    partnerStudents: val('partner_students'),
+    freeStudents:    sumIfComplete([tuitionFree, val('partner_students')]),
+    paidEnrollments: feeBased,
+    freeAudience:    val('free_audience'),
+    paidAudience:    val('paid_audience'),
+  }
+
+  // Attendees 18 and under: CMC students 18 and under + partner students +
+  // 60% of all audience members, rounded to a whole person.
+  const ages = studentAges(enrollments, eventsById, birthdates)
+  const audienceCombined = sumIfComplete([val('paid_audience'), val('free_audience')])
+  const audienceYouth    = audienceCombined == null ? null : Math.round(audienceCombined * AUDIENCE_YOUTH_SHARE)
+  const youth = {
+    ages,
+    cmcStudents:     ages.youth,
+    partnerStudents: val('partner_students'),
+    audienceCombined,
+    audienceYouth,
+    total:           sumIfComplete([ages.youth, val('partner_students'), audienceYouth]),
+  }
+
+  const partner = Object.fromEntries(DATA_ARTS_FIELDS.map(f => [f.key, val(f.key)]))
+  const missingInput = DATA_ARTS_FIELDS.filter(f => val(f.key) == null).map(f => f.label)
+
+  return { online, partner, groupClasses, privateLessons, participation, youth, missingInput }
+}
+
+// The report as labelled rows, one table per Data Arts category, in the order
+// the Data Arts form asks for them. Shared by the screen and the CSV so they
+// can't disagree. `value` null renders as "—" with `note` explaining why.
+function reportSections(r) {
+  const NEEDS_INPUT = 'Needs Data Arts Input'
+  const inputRow = (label, value, source = 'Data Arts Input') =>
+    ({ label, value, source, note: value == null ? NEEDS_INPUT : null })
+
+  return [
+    {
+      id: 'online', title: 'Online vs Physical Classes',
+      rows: [
+        { label: 'Online',  value: r.online.lessons.online + r.online.classes.online, source: 'ASAP', top: true },
+        { label: 'Private lesson enrollments', value: r.online.lessons.online, source: 'ASAP' },
+        { label: 'Group class sections',       value: r.online.classes.online, source: 'ASAP' },
+        { label: 'On-site', value: r.online.lessons.onsite + r.online.classes.onsite, source: 'ASAP', top: true },
+        { label: 'Private lesson enrollments', value: r.online.lessons.onsite, source: 'ASAP' },
+        { label: 'Group class sections',       value: r.online.classes.onsite, source: 'ASAP' },
+      ],
+    },
+    {
+      id: 'partner', title: 'Partner Stats',
+      rows: DATA_ARTS_FIELDS.map(f => ({ ...inputRow(f.label, r.partner[f.key]), top: true })),
+    },
+    {
+      id: 'group', title: 'Number of Group Classes',
+      rows: [
+        { label: 'Distinct classes', value: r.groupClasses.sections, source: 'ASAP', top: true },
+        { label: 'Classes (one per section)', value: r.groupClasses.regular.sections, source: 'ASAP' },
+        { label: 'Camps (one per session)',   value: r.groupClasses.camps.sections,   source: 'ASAP' },
+        { label: 'Times offered', value: r.groupClasses.timesOffered, source: 'ASAP', top: true },
+        { label: 'Class meetings', value: r.groupClasses.regular.timesOffered, source: 'ASAP',
+          note: r.groupClasses.regular.noMeetings ? `${r.groupClasses.regular.noMeetings} section(s) have no meeting count in ASAP and add 0` : null },
+        { label: 'Camp days (Mon–Fri)', value: r.groupClasses.camps.days, source: 'ASAP',
+          note: r.groupClasses.camps.noDates ? `${r.groupClasses.camps.noDates} camp(s) have no usable dates and add 0` : null },
+      ],
+    },
+    {
+      id: 'lessons', title: 'Number of Private Lessons',
+      rows: [
+        { label: 'Private lessons', value: r.privateLessons.lessons, source: 'ASAP', top: true,
+          note: r.privateLessons.noMeetings ? `${r.privateLessons.noMeetings} enrollment(s) have no lesson count in ASAP and add 0` : null },
+        { label: 'Private lesson enrollments', value: r.privateLessons.enrollments, source: 'ASAP' },
+      ],
+    },
+    {
+      id: 'participation', title: 'Attendance / Participation (all ages)',
+      rows: [
+        { label: 'Free students', value: r.participation.freeStudents, source: 'Combined', top: true,
+          note: r.participation.freeStudents == null ? NEEDS_INPUT : null },
+        { label: 'Tuition-free enrollments at CMC', value: r.participation.tuitionFree, source: 'ASAP' },
+        inputRow('Partner program students', r.participation.partnerStudents),
+        { label: 'Paid enrollments at CMC', value: r.participation.paidEnrollments, source: 'ASAP', top: true,
+          note: r.participation.unclassified ? `${r.participation.unclassified} enrollment(s) have no tuition status and are in neither row` : null },
+        { ...inputRow('Free audience', r.participation.freeAudience), top: true },
+        { ...inputRow('Paid audience', r.participation.paidAudience), top: true },
+      ],
+    },
+    {
+      id: 'youth', title: 'Number of Attendees (18 and under)',
+      rows: [
+        { label: 'Attendees 18 and under', value: r.youth.total, source: 'Combined', top: true,
+          note: r.youth.total == null ? NEEDS_INPUT : null },
+        { label: 'CMC students 18 and under', value: r.youth.cmcStudents, source: 'ASAP',
+          note: r.youth.ages.unknown ? `${r.youth.ages.unknown} of ${r.youth.ages.total} students have no usable birthdate and aren't counted` : null },
+        inputRow('Partner program students', r.youth.partnerStudents),
+        { label: `Audience estimate (${AUDIENCE_YOUTH_SHARE * 100}% of ${r.youth.audienceCombined == null ? 'paid + free' : r.youth.audienceCombined.toLocaleString()})`,
+          value: r.youth.audienceYouth, source: 'Data Arts Input',
+          note: r.youth.audienceYouth == null ? NEEDS_INPUT : null },
+      ],
+    },
+  ]
+}
+
+// ─── end pure logic ─────────────────────────────────────────────────────────
+
+function esc(v) { return `"${String(v ?? '').replace(/"/g, '""')}"` }
+
+function triggerDownload(csv, filename) {
+  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }))
+  Object.assign(document.createElement('a'), { href: url, download: filename }).click()
+  URL.revokeObjectURL(url)
+}
+
+function today() { return new Date().toISOString().slice(0, 10) }
+
+function fmt(v) {
+  if (v == null) return '—'
+  return Number.isInteger(v) ? v.toLocaleString() : v.toLocaleString(undefined, { maximumFractionDigits: 2 })
+}
+
+function exportCSV(sections, report, fy) {
+  const rows = [['Section', 'Measure', fy, 'Source', 'Note']]
+  for (const s of sections) {
+    for (const r of s.rows) rows.push([s.title, r.top ? r.label : `  ${r.label}`, r.value ?? '', r.source, r.note ?? ''])
+  }
+  rows.push([])
+  rows.push(['Private lessons by branch and quarter', 'Branch', 'Quarter', 'Enrollments', 'Lessons'])
+  for (const b of report.privateLessons.byBranchQuarter) rows.push(['', b.location, b.time_period, b.enrollments, b.lessons])
+  rows.push([])
+  rows.push(['Camps counted', 'Course', 'Dates', 'ASAP meetings', 'Days counted'])
+  for (const c of report.groupClasses.camps.rows) rows.push(['', c.course, `${c.start} – ${c.end}`, c.meetings ?? '', c.days ?? ''])
+  triggerDownload(rows.map(r => r.map(esc).join(',')).join('\n'), `data-arts-${fy}-${today()}.csv`)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Presentation
+// ─────────────────────────────────────────────────────────────────────────────
+
+function SectionCard({ section, fy }) {
+  return (
+    <div className="liyp-group-card">
+      <div className="pig-roster-header">
+        <span className="pig-roster-title">{section.title}</span>
+      </div>
+      <div className="report-scroll">
+        <table className="report-table">
+          <thead>
+            <tr>
+              <th className="rt-label-hdr">Measure</th>
+              <th className="rt-period-hdr"><div className="rt-period-name">{fy}</div></th>
+              <th className="rt-label-hdr da-source-hdr">Source</th>
+            </tr>
+          </thead>
+          <tbody>
+            {section.rows.map((row, i) => (
+              <tr key={i} className={row.top ? 'rt-row rt-top-row' : 'rt-row rt-sub-row'}>
+                <td className="rt-label">
+                  {row.label}
+                  {row.note && <div className={`da-note${row.value == null ? ' da-note--missing' : ''}`}>{row.note}</div>}
+                </td>
+                <td className="rt-period-cell"><div className="cell-enr">{fmt(row.value)}</div></td>
+                <td className="da-source">{row.source}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Main report component
+// ─────────────────────────────────────────────────────────────────────────────
+
+export default function DataArtsReport() {
+  const [years, setYears]           = useState([])
+  const [yearsLoading, setYearsLoading] = useState(true)
+  const [fy, setFy]                 = useState(null)
+  const [data, setData]             = useState(null)
+  const [loading, setLoading]       = useState(false)
+  const [error, setError]           = useState(null)
+  const [infoOpen, setInfoOpen]     = useState(false)
+  const [detailOpen, setDetailOpen] = useState(false)
+
+  // Only the newest fetch may commit — clicking pills in quick succession
+  // otherwise lets a slower, older year overwrite the one now selected.
+  const loadSeq = useRef(0)
+
+  // Phase 1: FY26 through the newest fiscal year on file. One row, not a scan
+  // of every event.
+  useEffect(() => {
+    (async () => {
+      const { data: latest, error: err } = await supabase
+        .from('events').select('fiscal_year').order('fiscal_year', { ascending: false }).limit(1)
+      if (err) setError(err.message)
+      else setYears(dataArtsYearsThrough(latest?.[0]?.fiscal_year ?? FIRST_DATA_ARTS_FY))
+      setYearsLoading(false)
+    })()
+  }, [])
+
+  useEffect(() => {
+    if (!fy) return
+    loadData(fy)
+  }, [fy])
+
+  // Phase 2: that year's events and enrollments, flat and in parallel, the
+  // enrolled students' birthdates by ID, and the year's Data Arts Input row.
+  async function loadData(year) {
+    const seq = ++loadSeq.current
+    setLoading(true); setError(null); setData(null)
+    try {
+      const [events, enrollments, input] = await Promise.all([
+        fetchAll(supabase, 'events', {
+          select: 'event_id, course_name, activity_type, location, facility, primary_instructor, class_start_date, class_end_date, all_meetings, time_period',
+          orderBy: 'event_id',
+          apply: q => q.eq('fiscal_year', year),
+        }),
+        fetchAll(supabase, 'enrollments', {
+          select: 'event_enrollment_id, event_id, customer_id, is_tuition_free',
+          orderBy: 'event_enrollment_id',
+          apply: q => q.eq('fiscal_year', year),
+        }),
+        loadDataArtsInput(supabase, year),
+      ])
+      const students = await fetchByIds(supabase, 'students', {
+        column: 'customer_id', values: enrollments.map(e => e.customer_id), select: 'customer_id, birthdate',
+      })
+      if (seq !== loadSeq.current) return
+      if (input.error) throw new Error(input.error)
+
+      // A missed join would silently undercount, so fail loudly instead.
+      const eventIds = new Set(events.map(e => e.event_id))
+      const orphans = enrollments.filter(e => !eventIds.has(e.event_id)).length
+      if (orphans) throw new Error(`${orphans} ${year} enrollments point at events outside ${year} — re-upload the year before reporting.`)
+
+      setData({
+        events, enrollments, input,
+        birthdates: new Map(students.map(s => [s.customer_id, s.birthdate])),
+      })
+    } catch (e) {
+      if (seq === loadSeq.current) setError(e.message)
+    } finally {
+      if (seq === loadSeq.current) setLoading(false)
+    }
+  }
+
+  const report = useMemo(() => data && buildReport({
+    events: data.events, enrollments: data.enrollments, birthdates: data.birthdates, input: data.input.row,
+  }), [data])
+  const sections = useMemo(() => report && reportSections(report), [report])
+
+  if (yearsLoading) return <p className="coming-soon">Loading…</p>
+
+  return (
+    <div className="pig-report">
+      {error && <div className="error-banner">{error}</div>}
+
+      {/* Methodology */}
+      <div className="pig-courses ugcb-info-block">
+        <button className="pig-courses-toggle" onClick={() => setInfoOpen(o => !o)}>
+          <span>About this report</span>
+          <span className="pig-courses-chevron">{infoOpen ? '▲' : '▼'}</span>
+        </button>
+        {infoOpen && (
+          <div className="ugcb-info-body">
+            <div className="ugcb-info-section-title">What this report is for</div>
+            <p>
+              The figures CMC submits each year to <strong>Data Arts</strong>, one fiscal year at a
+              time. It is never run by quarter or for several years combined. It starts with FY26.
+              A fiscal year runs Summer → Fall → Winter → Spring (FY26 = Summer 2025 – Spring 2026),
+              and every ASAP record is assigned to a year by ASAP's own Fiscal Year column.
+            </p>
+            <p>
+              Figures come from two places, named in each table's <strong>Source</strong> column:
+              the uploaded <strong>ASAP</strong> exports, and the <strong>Data Arts Input</strong>{' '}
+              page, where staff enter the partner-program and audience figures that program
+              managers collect outside ASAP. <strong>Combined</strong> rows add the two.
+              Before running the report, upload a full-year Enrollment + Super Enrollment pull for
+              the year (see the Upload page) and complete that year's Data Arts Input.
+            </p>
+            <p>
+              A Data Arts Input field left blank shows as "—" with <em>Needs Data Arts Input</em>,
+              and so does any total that needs it. Blanks are never read as 0, so the report never
+              shows a total that is quietly too low.
+            </p>
+
+            <div className="ugcb-info-section-title">Online vs Physical Classes</div>
+            <p>
+              Private lessons are counted per <strong>enrollment</strong>; group classes per{' '}
+              <strong>section</strong> (one ASAP class ID). A lesson or class is online when its ASAP
+              location or facility contains the word "virtual". In practice that's the facility,
+              e.g. <em>Virtual Music Studio</em> or <em>&lt;Teacher&gt; Virtual Studio</em>.
+              Everything else is on-site. Online + on-site = all lesson enrollments and all class
+              sections for the year.
+            </p>
+
+            <div className="ugcb-info-section-title">Partner Stats</div>
+            <p>
+              Exactly as entered on the Data Arts Input page for the year, with no calculation.
+            </p>
+
+            <div className="ugcb-info-section-title">Number of Group Classes</div>
+            <p>
+              <strong>Distinct classes</strong>: every group-class section (unique ASAP class ID)
+              in the year. The same course with the same teacher is a separate class each quarter
+              and each section.
+            </p>
+            <p>
+              <strong>Times offered</strong>: the meetings of every section added up, using ASAP's{' '}
+              <em>All Meetings</em> count, which already leaves out holidays. Mariachi CMC in
+              Fall, Winter and Spring is 3 distinct classes, and its times offered is the three
+              quarters' meetings added together. Two summer sections of Intro to Piano at 8
+              meetings each give 2 classes and 16.
+            </p>
+            <p>
+              <strong>Camps</strong> count <em>days</em> instead of meetings. A camp is any group
+              class whose course name contains a word beginning with "camp" (Camp CMC, CMC Sparks
+              Camp, Campamento CMC…), and its days are the weekdays (Mon–Fri) from its start date
+              to its end date. A Mon–Fri camp is 5. Dates are used because ASAP's meeting count
+              for camps isn't reliable: FY26's Camp CMC ran Mon–Fri but records 1 meeting. Each
+              camp session still counts once under distinct classes. Every camp counted is listed
+              under <em>Details</em> with its dates, ASAP meeting count and the days counted.
+              Anything not named as a camp, such as a weekend workshop, is counted by meetings.
+            </p>
+
+            <div className="ugcb-info-section-title">Number of Private Lessons</div>
+            <p>
+              Each private lesson enrollment times the lessons booked for it that quarter
+              (ASAP's <em>All Meetings</em> on the lesson). This is the actual count per student,
+              so a student who started mid-quarter adds fewer lessons. A teacher with 10 students
+              at 14 lessons in Fall, 12 in Winter, 10 in Spring and 8 in Summer adds 440. The
+              branch × quarter breakdown under <em>Details</em> shows how the total builds up.
+              The few lessons ASAP has no count for are named in a note and add 0.
+            </p>
+
+            <div className="ugcb-info-section-title">Attendance / Participation (all ages)</div>
+            <ul>
+              <li><strong>Free students</strong> = every tuition-free enrollment at CMC + the
+                partner program students from Data Arts Input. Tuition-free means the enrollment
+                cost $15 or less after discounts, the same rule the Enrollment page uses.</li>
+              <li><strong>Paid enrollments at CMC</strong> = every fee-based enrollment.</li>
+              <li><strong>Free audience</strong> and <strong>paid audience</strong>: from Data Arts
+                Input.</li>
+            </ul>
+            <p>
+              CMC figures here are <strong>enrollments</strong>, not unique students: a student in
+              three classes counts three times. Tuition-free + paid = every enrollment in the year.
+            </p>
+
+            <div className="ugcb-info-section-title">Number of Attendees (18 and under)</div>
+            <p>
+              Three parts added together:
+            </p>
+            <ul>
+              <li><strong>CMC students 18 and under</strong>: <em>unique</em> students enrolled in
+                the year, each aged at the start date of their earliest class that year (the
+                Demographics report's convention), so a student who turns 19 mid-year still counts.
+                Students with no birthdate, ASAP's 1900-01-01 placeholder, or an age outside 0–100
+                can't be aged and aren't counted. The note on that row gives how many.</li>
+              <li><strong>Partner program students</strong> from Data Arts Input, all of them.</li>
+              <li><strong>Audience estimate</strong>: paid + free audience × 60%, CMC's estimate
+                of the share of its audiences that are under 18, rounded to a whole person.</li>
+            </ul>
+
+            <div className="ugcb-info-section-title">Export</div>
+            <p>
+              <strong>Export CSV</strong> writes every row shown, with its source and any note,
+              followed by the private-lesson branch × quarter breakdown and the list of camps.
+            </p>
+          </div>
+        )}
+      </div>
+
+      <div className="period-selector">
+        <div className="period-selector-header">
+          <span className="period-selector-title">Select Fiscal Year</span>
+        </div>
+        <div className="period-pills">
+          {years.map(y => (
+            <button key={y} className={`period-pill${fy === y ? ' active' : ''}`} onClick={() => setFy(y)}>
+              {y}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {!fy ? (
+        <p className="coming-soon">Select a fiscal year above to view the report.</p>
+      ) : loading || !report ? (
+        loading && <p className="coming-soon">Loading {fy}…</p>
+      ) : (
+        <>
+          <InputStatus fy={fy} input={data.input} missing={report.missingInput} />
+
+          <div className="pig-roster-header">
+            <span className="pig-roster-title">Data Arts Report — {fy} ({fiscalYearSpan(fy)})</span>
+            <button className="btn-secondary" onClick={() => exportCSV(sections, report, fy)}>Export CSV</button>
+          </div>
+
+          {sections.map(s => <SectionCard key={s.id} section={s} fy={fy} />)}
+
+          {/* Working detail: how the lesson and camp totals were built */}
+          <div className="pig-courses">
+            <button className="pig-courses-toggle" onClick={() => setDetailOpen(o => !o)}>
+              <span>Details — private lessons by branch and quarter, and camps counted</span>
+              <span className="pig-courses-chevron">{detailOpen ? '▲' : '▼'}</span>
+            </button>
+            {detailOpen && <Details report={report} />}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+function InputStatus({ fy, input, missing }) {
+  if (input.missingTable) {
+    return (
+      <div className="warn-banner da-status">
+        The Data Arts Input table hasn't been set up yet, so partner and audience figures are
+        missing. Run <code>supabase/migrations/005_data_arts_input.sql</code> in the Supabase SQL
+        editor.
+      </div>
+    )
+  }
+  if (!input.row) {
+    return (
+      <div className="warn-banner da-status">
+        No Data Arts Input entered for {fy}. Partner and audience figures, and the totals that
+        include them, are blank until it is. <Link to="/data-arts-input">Enter {fy} figures →</Link>
+      </div>
+    )
+  }
+  const when = new Date(input.row.updated_at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+  return (
+    <div className={`${missing.length ? 'warn-banner' : 'last-upload'} da-status`}>
+      Data Arts Input for {fy} last saved {when}{input.row.updated_by && <> by {input.row.updated_by}</>}.
+      {missing.length > 0 && <> Still blank: {missing.join(', ')}. <Link to="/data-arts-input">Complete it →</Link></>}
+    </div>
+  )
+}
+
+function Details({ report }) {
+  const pl = report.privateLessons
+  const camps = report.groupClasses.camps
+  return (
+    <div className="da-details">
+      <div className="report-scroll">
+        <table className="report-table">
+          <thead>
+            <tr>
+              <th className="rt-label-hdr">Private lessons — branch · quarter</th>
+              <th className="rt-period-hdr">Enrollments</th>
+              <th className="rt-period-hdr">Lessons</th>
+            </tr>
+          </thead>
+          <tbody>
+            {pl.byBranchQuarter.map(b => (
+              <tr key={`${b.location}|${b.time_period}`} className="rt-row rt-sub-row">
+                <td className="rt-label">{b.location} · {b.time_period}</td>
+                <td className="rt-period-cell">{b.enrollments.toLocaleString()}</td>
+                <td className="rt-period-cell">{b.lessons.toLocaleString()}</td>
+              </tr>
+            ))}
+            <tr className="rt-row rt-top-row">
+              <td className="rt-label">Total</td>
+              <td className="rt-period-cell">{pl.enrollments.toLocaleString()}</td>
+              <td className="rt-period-cell">{pl.lessons.toLocaleString()}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div className="report-scroll">
+        <table className="report-table">
+          <thead>
+            <tr>
+              <th className="rt-label-hdr">Camp</th>
+              <th className="rt-label-hdr">Dates</th>
+              <th className="rt-period-hdr">ASAP meetings</th>
+              <th className="rt-period-hdr">Days counted</th>
+            </tr>
+          </thead>
+          <tbody>
+            {camps.rows.length === 0 ? (
+              <tr className="rt-row"><td className="rt-label" colSpan={4}>No camps found this year.</td></tr>
+            ) : camps.rows.map(c => (
+              <tr key={c.event_id} className="rt-row rt-sub-row">
+                <td className="rt-label">{c.course}<div className="da-note">{c.instructor}</div></td>
+                <td className="rt-label">{c.start} – {c.end}</td>
+                <td className="rt-period-cell">{c.meetings ?? '—'}</td>
+                <td className="rt-period-cell">{c.days ?? '—'}</td>
+              </tr>
+            ))}
+            {camps.rows.length > 0 && (
+              <tr className="rt-row rt-top-row">
+                <td className="rt-label" colSpan={3}>Total camp days</td>
+                <td className="rt-period-cell">{camps.days.toLocaleString()}</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
