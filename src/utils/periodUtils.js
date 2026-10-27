@@ -73,3 +73,19 @@ export function classStartDate(raw) {
   if (!year || year < MIN_PLAUSIBLE_CLASS_YEAR || year > maxPlausibleClassYear()) return null
   return raw
 }
+
+// CMC's fixed quarter lengths in weeks. Reports that count "times offered" for
+// a group class use these rather than ASAP's All Meetings, which drifts with
+// holidays and data entry (FY26 summer sections record anywhere from 4 to 11).
+export const QUARTER_WEEKS = { Summer: 8, Fall: 14, Winter: 12, Spring: 10 }
+
+// The season of an ASAP Time Period — "Summer2025", "Fall 2025", "Winter2026"
+// (the spacing varies by export) — or null if it isn't one of the four.
+export function timePeriodSeason(timePeriod) {
+  const m = String(timePeriod ?? '').trim().match(/^(summer|fall|winter|spring)/i)
+  return m ? m[1][0].toUpperCase() + m[1].slice(1).toLowerCase() : null
+}
+
+export function quarterWeeks(timePeriod) {
+  return QUARTER_WEEKS[timePeriodSeason(timePeriod)] ?? null
+}

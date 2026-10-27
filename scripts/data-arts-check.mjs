@@ -27,14 +27,19 @@ if (start < 0 || end < 0) {
 }
 
 const moduleSrc = [
-  `import { classStartDate } from '${join(root, 'src/utils/periodUtils.js')}'`,
+  `import { classStartDate, quarterWeeks, timePeriodSeason, QUARTER_WEEKS } from '${join(root, 'src/utils/periodUtils.js')}'`,
+  `import { isCamp, campDays, weekdaysBetween, CAMP_MAX_DAYS } from '${join(root, 'src/utils/camps.js')}'`,
   `import { DATA_ARTS_FIELDS } from '${join(root, 'src/utils/dataArtsInput.js')}'`,
   src.slice(start, end),
-  'export { buildReport, reportSections, weekdaysBetween, isCamp, AUDIENCE_YOUTH_SHARE }',
+  'export { buildReport, reportSections, weekdaysBetween, isCamp, campDays, AUDIENCE_YOUTH_SHARE }',
 ].join('\n')
 const scratch = join(mkdtempSync(join(tmpdir(), 'data-arts-')), 'extracted.mjs')
 writeFileSync(scratch, moduleSrc)
-const { buildReport, reportSections, weekdaysBetween, isCamp, AUDIENCE_YOUTH_SHARE } = await import(scratch)
+const { buildReport, reportSections, weekdaysBetween, isCamp, campDays, AUDIENCE_YOUTH_SHARE } = await import(scratch)
+
+// CMC's quarter lengths as CMC stated them, written out here rather than
+// imported so a slip in QUARTER_WEEKS is caught instead of agreed with.
+const LAW_WEEKS = { summer: 8, fall: 14, winter: 12, spring: 10 }
 
 // ─── fetch, exactly as the report does ──────────────────────────────────────
 const [events, enrollments] = await Promise.all([
@@ -87,16 +92,34 @@ check('online + on-site class sections = all class sections', r.online.classes.o
 
 console.log('\n=== 2. Group classes ===')
 check('classes + camps = all class sections', r.groupClasses.regular.sections + r.groupClasses.camps.sections, classEvents.length)
-check('class meetings = sum of All Meetings on non-camp sections',
-  r.groupClasses.regular.timesOffered, classEvents.filter(e => !isCamp(e)).reduce((a, e) => a + (e.all_meetings ?? 0), 0))
-check('times offered = class meetings + camp days', r.groupClasses.timesOffered, r.groupClasses.regular.timesOffered + r.groupClasses.camps.days)
-// The weekday counter against calendar facts rather than a second implementation.
+const regularEvents = classEvents.filter(e => !isCamp(e))
+const lawSeason = tp => String(tp ?? '').trim().toLowerCase().match(/^(summer|fall|winter|spring)/)?.[1]
+check('every non-camp section has a recognisable quarter', regularEvents.filter(e => !lawSeason(e.time_period)).length, 0)
+check('class weeks = Σ CMC quarter length over non-camp sections',
+  r.groupClasses.regular.timesOffered, regularEvents.reduce((a, e) => a + (LAW_WEEKS[lawSeason(e.time_period)] ?? 0), 0))
+check('quarter rows sum to non-camp sections', r.groupClasses.regular.byQuarter.reduce((a, q) => a + q.sections, 0), r.groupClasses.regular.sections)
+check('quarter rows sum to class weeks', r.groupClasses.regular.byQuarter.reduce((a, q) => a + q.timesOffered, 0), r.groupClasses.regular.timesOffered)
+check('times offered = class weeks + camp days', r.groupClasses.timesOffered, r.groupClasses.regular.timesOffered + r.groupClasses.camps.days)
+// The camp rule's margin: the shortest non-camp section, from raw dates.
+const spans = regularEvents.filter(e => e.class_start_date && e.class_end_date)
+  .map(e => (Date.parse(e.class_end_date) - Date.parse(e.class_start_date)) / 864e5 + 1)
+console.log(`  shortest non-camp section: ${Math.min(...spans)} days; sections without dates: ${r.groupClasses.regular.noDates}`)
+for (const q of r.groupClasses.regular.byQuarter) console.log(`    ${q.time_period.padEnd(12)} ${String(q.sections).padStart(4)} sections × ${q.weeks} weeks = ${q.timesOffered}`)
+// The weekday counter and camp rule against calendar facts rather than a second implementation.
 check('weekdays Mon 2025-06-16 → Fri 2025-06-20 (Camp CMC)', weekdaysBetween('2025-06-16', '2025-06-20'), 5)
 check('weekdays Mon 2025-06-30 → Thu 2025-07-03 (Mariachi Camp)', weekdaysBetween('2025-06-30', '2025-07-03'), 4)
 check('weekdays Fri 2025-07-18 → Sun 2025-07-20', weekdaysBetween('2025-07-18', '2025-07-20'), 1)
 check('weekdays across a weekend, Mon → next Fri', weekdaysBetween('2025-07-14', '2025-07-25'), 10)
+const cls = (s, e, m) => ({ activity_type: 'CLASS', class_start_date: s, class_end_date: e, all_meetings: m })
+check('Mon–Fri camp, ASAP 1 meeting → 5 days', campDays(cls('2025-06-16', '2025-06-20', 1)), 5)
+check('Fri–Sun workshop, 3 meetings → 3 days', campDays(cls('2025-07-18', '2025-07-20', 3)), 3)
+check('two-week Mon–Fri camp (12 days) is a camp → 10 days', campDays(cls('2025-07-14', '2025-07-25', 10)), 10)
+check('14 days start to end is a camp', isCamp(cls('2025-07-14', '2025-07-27', 10)), true)
+check('15 days start to end is not', isCamp(cls('2025-07-14', '2025-07-28', 11)), false)
+check('a lesson is never a camp', isCamp({ ...cls('2025-07-14', '2025-07-18', 5), activity_type: 'LESSON' }), false)
+check('placeholder end date is not a camp', isCamp(cls('2025-07-14', '2050-01-01', 5)), false)
 console.log('  camps counted:')
-for (const c of r.groupClasses.camps.rows) console.log(`    ${c.course.padEnd(28)} ${c.start} → ${c.end}   ASAP meetings ${String(c.meetings ?? '—').padStart(2)}   days ${c.days ?? '—'}`)
+for (const c of r.groupClasses.camps.rows) console.log(`    ${c.course.padEnd(28)} ${c.start} → ${c.end}   ASAP meetings ${String(c.meetings ?? '—').padStart(2)}   weekdays ${c.weekdays}   days ${c.days}`)
 
 console.log('\n=== 3. Private lessons ===')
 const nestedLessons = nested.filter(e => e.events?.activity_type === 'LESSON')

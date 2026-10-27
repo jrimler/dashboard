@@ -2,7 +2,8 @@ import { useState, useEffect, useMemo, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { fetchAll, fetchByIds } from '../utils/fetchAll'
-import { classStartDate } from '../utils/periodUtils'
+import { classStartDate, quarterWeeks, timePeriodSeason, QUARTER_WEEKS } from '../utils/periodUtils'
+import { isCamp, campDays, weekdaysBetween, CAMP_MAX_DAYS } from '../utils/camps'
 import {
   DATA_ARTS_FIELDS, FIRST_DATA_ARTS_FY,
   loadDataArtsInput, dataArtsYearsThrough, fiscalYearSpan,
@@ -16,11 +17,6 @@ import {
 // the word there is still caught.
 const VIRTUAL_RE = /virtual/i
 
-// Camps aren't a category in any ASAP export, so they're recognised by name:
-// "Camp CMC", "CMC Sparks Camp", "Campamento CMC"… Every match is listed on the
-// report, so a rename that slips out of (or into) the pattern is visible.
-const CAMP_RE = /\bcamp/i
-
 // Data Arts counts attendees "18 and under".
 const YOUTH_MAX_AGE = 18
 
@@ -32,33 +28,6 @@ const MAX_PLAUSIBLE_AGE = 100
 
 function isVirtual(ev) {
   return VIRTUAL_RE.test(ev?.location ?? '') || VIRTUAL_RE.test(ev?.facility ?? '')
-}
-
-function isCamp(ev) {
-  return ev?.activity_type === 'CLASS' && CAMP_RE.test(ev.course_name ?? '')
-}
-
-// Mon–Fri days from start to end inclusive, "YYYY-MM-DD" strings. A camp's
-// meeting count in ASAP can't be trusted — Camp CMC (FY26) ran Mon–Fri but
-// records 1 meeting — so camp days come from its dates instead.
-function weekdaysBetween(start, end) {
-  const d = new Date(start + 'T00:00:00Z'), last = new Date(end + 'T00:00:00Z')
-  let n = 0
-  while (d <= last) {
-    const dow = d.getUTCDay()
-    if (dow !== 0 && dow !== 6) n++
-    d.setUTCDate(d.getUTCDate() + 1)
-  }
-  return n
-}
-
-// null when either date is missing or a placeholder (classStartDate applies the
-// same plausibility check to an end date) — the camp is then flagged, not guessed.
-function campDays(ev) {
-  const start = classStartDate(ev.class_start_date)
-  const end   = classStartDate(ev.class_end_date)
-  if (!start || !end || end < start) return null
-  return weekdaysBetween(start, end)
 }
 
 function ageAtDate(birthdateStr, referenceDateStr) {
@@ -125,10 +94,21 @@ function buildReport({ events, enrollments, birthdates, input }) {
   online.lessons.onsite = lessonEnr.length - online.lessons.online
   online.classes.onsite = classes.length   - online.classes.online
 
-  // Group classes: each section is one distinct class, offered once per
-  // meeting — Mariachi CMC in Fall (14), Winter and Spring is three classes and
-  // the sum of their meetings. Camps count days instead of meetings.
-  const regularNoMeetings = regular.filter(e => e.all_meetings == null)
+  // Group classes: each section is one distinct class, offered once per week
+  // of its quarter (CMC's fixed lengths, not ASAP's meeting count) — Mariachi
+  // CMC in Fall, Winter and Spring is three classes and 14 + 12 + 10. Camps
+  // count the days they ran instead.
+  const byQuarter = new Map()
+  for (const e of regular) {
+    const tp = e.time_period ?? '—'
+    const q = byQuarter.get(tp) ?? { time_period: tp, season: timePeriodSeason(tp), weeks: quarterWeeks(tp), sections: 0, timesOffered: 0, start: null }
+    q.sections++
+    q.timesOffered += q.weeks ?? 0
+    const start = classStartDate(e.class_start_date)
+    if (start && (!q.start || start < q.start)) q.start = start
+    byQuarter.set(tp, q)
+  }
+  const quarterRows = [...byQuarter.values()].sort((a, b) => (a.start ?? '').localeCompare(b.start ?? ''))
   const campRows = camps.map(e => ({
     event_id:   e.event_id,
     course:     (e.course_name ?? '').trim(),
@@ -136,18 +116,24 @@ function buildReport({ events, enrollments, birthdates, input }) {
     start:      e.class_start_date,
     end:        e.class_end_date,
     meetings:   e.all_meetings,
+    weekdays:   weekdaysBetween(e.class_start_date, e.class_end_date),
     days:       campDays(e),
   })).sort((a, b) => (a.start ?? '').localeCompare(b.start ?? '') || a.course.localeCompare(b.course))
   const groupClasses = {
     regular: {
       sections:     regular.length,
-      timesOffered: sum(regular.map(e => e.all_meetings ?? 0)),
-      noMeetings:   regularNoMeetings.length,
+      timesOffered: sum(quarterRows.map(q => q.timesOffered)),
+      // A Time Period that isn't one of the four seasons has no length, adds 0
+      // and is named in a note rather than guessed.
+      noQuarter:    sum(quarterRows.filter(q => q.weeks == null).map(q => q.sections)),
+      // Without real dates a section can't be measured against the camp rule,
+      // so it counts as a regular class; the note makes that visible.
+      noDates:      regular.filter(e => !classStartDate(e.class_start_date) || !classStartDate(e.class_end_date)).length,
+      byQuarter:    quarterRows,
     },
     camps: {
       sections: camps.length,
-      days:     sum(campRows.map(c => c.days ?? 0)),
-      noDates:  campRows.filter(c => c.days == null).length,
+      days:     sum(campRows.map(c => c.days)),
       rows:     campRows,
     },
   }
@@ -245,10 +231,12 @@ function reportSections(r) {
         { label: 'Classes (one per section)', value: r.groupClasses.regular.sections, source: 'ASAP' },
         { label: 'Camps (one per session)',   value: r.groupClasses.camps.sections,   source: 'ASAP' },
         { label: 'Times offered', value: r.groupClasses.timesOffered, source: 'ASAP', top: true },
-        { label: 'Class meetings', value: r.groupClasses.regular.timesOffered, source: 'ASAP',
-          note: r.groupClasses.regular.noMeetings ? `${r.groupClasses.regular.noMeetings} section(s) have no meeting count in ASAP and add 0` : null },
-        { label: 'Camp days (Mon–Fri)', value: r.groupClasses.camps.days, source: 'ASAP',
-          note: r.groupClasses.camps.noDates ? `${r.groupClasses.camps.noDates} camp(s) have no usable dates and add 0` : null },
+        { label: 'Class weeks (quarter length × sections)', value: r.groupClasses.regular.timesOffered, source: 'ASAP',
+          note: [
+            r.groupClasses.regular.noQuarter ? `${r.groupClasses.regular.noQuarter} section(s) have no recognisable quarter and add 0` : null,
+            r.groupClasses.regular.noDates ? `${r.groupClasses.regular.noDates} section(s) have no usable dates, so couldn't be tested as camps` : null,
+          ].filter(Boolean).join('; ') || null },
+        { label: 'Camp days', value: r.groupClasses.camps.days, source: 'ASAP' },
       ],
     },
     {
@@ -314,8 +302,11 @@ function exportCSV(sections, report, fy) {
   rows.push(['Private lessons by branch and quarter', 'Branch', 'Quarter', 'Enrollments', 'Lessons'])
   for (const b of report.privateLessons.byBranchQuarter) rows.push(['', b.location, b.time_period, b.enrollments, b.lessons])
   rows.push([])
-  rows.push(['Camps counted', 'Course', 'Dates', 'ASAP meetings', 'Days counted'])
-  for (const c of report.groupClasses.camps.rows) rows.push(['', c.course, `${c.start} – ${c.end}`, c.meetings ?? '', c.days ?? ''])
+  rows.push(['Group classes by quarter', 'Quarter', 'Sections', 'Weeks', 'Times offered'])
+  for (const q of report.groupClasses.regular.byQuarter) rows.push(['', q.time_period, q.sections, q.weeks ?? '', q.timesOffered])
+  rows.push([])
+  rows.push(['Camps counted', 'Course', 'Dates', 'ASAP meetings', 'Weekdays', 'Days counted'])
+  for (const c of report.groupClasses.camps.rows) rows.push(['', c.course, `${c.start} – ${c.end}`, c.meetings ?? '', c.weekdays, c.days])
   triggerDownload(rows.map(r => r.map(esc).join(',')).join('\n'), `data-arts-${fy}-${today()}.csv`)
 }
 
@@ -494,21 +485,32 @@ export default function DataArtsReport() {
               and each section.
             </p>
             <p>
-              <strong>Times offered</strong>: the meetings of every section added up, using ASAP's{' '}
-              <em>All Meetings</em> count, which already leaves out holidays. Mariachi CMC in
-              Fall, Winter and Spring is 3 distinct classes, and its times offered is the three
-              quarters' meetings added together. Two summer sections of Intro to Piano at 8
-              meetings each give 2 classes and 16.
+              <strong>Times offered</strong>: each class counts once per week of its quarter,
+              using CMC's fixed quarter lengths: Fall {QUARTER_WEEKS.Fall} weeks,
+              Winter {QUARTER_WEEKS.Winter}, Spring {QUARTER_WEEKS.Spring},
+              Summer {QUARTER_WEEKS.Summer}. ASAP's meeting count is not used for classes, so a
+              holiday or a section that started late doesn't change the figure. Mariachi CMC in
+              Fall, Winter and Spring is 3 distinct classes and {QUARTER_WEEKS.Fall} +{' '}
+              {QUARTER_WEEKS.Winter} + {QUARTER_WEEKS.Spring} ={' '}
+              {QUARTER_WEEKS.Fall + QUARTER_WEEKS.Winter + QUARTER_WEEKS.Spring} times offered.
+              Two summer sections of Intro to Piano give 2 classes and {2 * QUARTER_WEEKS.Summer}.
+              The quarter comes from ASAP's Time Period. <em>Details</em> shows each quarter's
+              sections × weeks.
             </p>
             <p>
-              <strong>Camps</strong> count <em>days</em> instead of meetings. A camp is any group
-              class whose course name contains a word beginning with "camp" (Camp CMC, CMC Sparks
-              Camp, Campamento CMC…), and its days are the weekdays (Mon–Fri) from its start date
-              to its end date. A Mon–Fri camp is 5. Dates are used because ASAP's meeting count
-              for camps isn't reliable: FY26's Camp CMC ran Mon–Fri but records 1 meeting. Each
-              camp session still counts once under distinct classes. Every camp counted is listed
-              under <em>Details</em> with its dates, ASAP meeting count and the days counted.
-              Anything not named as a camp, such as a weekend workshop, is counted by meetings.
+              <strong>Camps</strong> count the <em>days</em> they ran instead. A camp is any group
+              class (a CLASS in ASAP) whose start and end dates are no more than{' '}
+              {CAMP_MAX_DAYS} days apart, counting both ends, whatever it's called. Term-length
+              classes all run over a month, so nothing else comes close. This means a short
+              workshop such as the Fri–Sun CMC Summer Jazz Workshop is a camp. A camp's days are
+              ASAP's meeting count or the number of weekdays (Mon–Fri) from start to end,
+              whichever is higher. A Mon–Fri camp is 5, and the Fri–Sun workshop is 3. Neither
+              figure works alone: FY26's Camp CMC ran Mon–Fri but ASAP records 1 meeting, and a
+              weekend workshop has only 1 weekday. Each camp session still counts once under
+              distinct classes. Every camp counted is listed under <em>Details</em> with its
+              dates, ASAP meeting count, weekdays and the days counted, so a one-off class that
+              falls inside the two-week rule is easy to spot. A section with no usable dates
+              can't be measured, so it counts as a regular class and is named in a note.
             </p>
 
             <div className="ugcb-info-section-title">Number of Private Lessons</div>
@@ -590,7 +592,7 @@ export default function DataArtsReport() {
           {/* Working detail: how the lesson and camp totals were built */}
           <div className="pig-courses">
             <button className="pig-courses-toggle" onClick={() => setDetailOpen(o => !o)}>
-              <span>Details — private lessons by branch and quarter, and camps counted</span>
+              <span>Details — private lessons by branch and quarter, group classes by quarter, and camps counted</span>
               <span className="pig-courses-chevron">{detailOpen ? '▲' : '▼'}</span>
             </button>
             {detailOpen && <Details report={report} />}
@@ -631,6 +633,7 @@ function InputStatus({ fy, input, missing }) {
 function Details({ report }) {
   const pl = report.privateLessons
   const camps = report.groupClasses.camps
+  const reg = report.groupClasses.regular
   return (
     <div className="da-details">
       <div className="report-scroll">
@@ -663,26 +666,57 @@ function Details({ report }) {
         <table className="report-table">
           <thead>
             <tr>
+              <th className="rt-label-hdr">Group classes (not camps) — quarter</th>
+              <th className="rt-period-hdr">Sections</th>
+              <th className="rt-period-hdr">Weeks</th>
+              <th className="rt-period-hdr">Times offered</th>
+            </tr>
+          </thead>
+          <tbody>
+            {reg.byQuarter.map(q => (
+              <tr key={q.time_period} className="rt-row rt-sub-row">
+                <td className="rt-label">{q.time_period}</td>
+                <td className="rt-period-cell">{q.sections.toLocaleString()}</td>
+                <td className="rt-period-cell">{q.weeks ?? '—'}</td>
+                <td className="rt-period-cell">{q.timesOffered.toLocaleString()}</td>
+              </tr>
+            ))}
+            <tr className="rt-row rt-top-row">
+              <td className="rt-label">Total</td>
+              <td className="rt-period-cell">{reg.sections.toLocaleString()}</td>
+              <td className="rt-period-cell"></td>
+              <td className="rt-period-cell">{reg.timesOffered.toLocaleString()}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div className="report-scroll">
+        <table className="report-table">
+          <thead>
+            <tr>
               <th className="rt-label-hdr">Camp</th>
               <th className="rt-label-hdr">Dates</th>
               <th className="rt-period-hdr">ASAP meetings</th>
+              <th className="rt-period-hdr">Weekdays</th>
               <th className="rt-period-hdr">Days counted</th>
             </tr>
           </thead>
           <tbody>
             {camps.rows.length === 0 ? (
-              <tr className="rt-row"><td className="rt-label" colSpan={4}>No camps found this year.</td></tr>
+              <tr className="rt-row"><td className="rt-label" colSpan={5}>No camps found this year.</td></tr>
             ) : camps.rows.map(c => (
               <tr key={c.event_id} className="rt-row rt-sub-row">
                 <td className="rt-label">{c.course}<div className="da-note">{c.instructor}</div></td>
                 <td className="rt-label">{c.start} – {c.end}</td>
                 <td className="rt-period-cell">{c.meetings ?? '—'}</td>
-                <td className="rt-period-cell">{c.days ?? '—'}</td>
+                <td className="rt-period-cell">{c.weekdays}</td>
+                <td className="rt-period-cell">{c.days}</td>
               </tr>
             ))}
             {camps.rows.length > 0 && (
               <tr className="rt-row rt-top-row">
-                <td className="rt-label" colSpan={3}>Total camp days</td>
+                <td className="rt-label" colSpan={4}>Total camp days</td>
                 <td className="rt-period-cell">{camps.days.toLocaleString()}</td>
               </tr>
             )}
