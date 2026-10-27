@@ -75,7 +75,7 @@ function check(label, actual, expected) {
 const nested = []
 for (let from = 0; ; from += 1000) {
   const { data, error } = await sb.from('enrollments')
-    .select('event_enrollment_id, customer_id, amount, total_discount, events(activity_type, is_virtual, all_meetings)')
+    .select('event_enrollment_id, customer_id, amount, total_discount, events(activity_type, is_virtual, all_meetings, time_period)')
     .eq('fiscal_year', FY).order('event_enrollment_id').range(from, from + 999)
   if (error) { console.error(error.message); process.exit(1) }
   nested.push(...data)
@@ -124,8 +124,14 @@ for (const c of r.groupClasses.camps.rows) console.log(`    ${c.course.padEnd(28
 console.log('\n=== 3. Private lessons ===')
 const nestedLessons = nested.filter(e => e.events?.activity_type === 'LESSON')
 check('lesson enrollments (nested join)', r.privateLessons.enrollments, nestedLessons.length)
-check('lessons = sum of All Meetings over lesson enrollments (nested join)',
-  r.privateLessons.lessons, nestedLessons.reduce((a, e) => a + (e.events.all_meetings ?? 0), 0))
+check('every lesson enrollment has a recognisable quarter (nested join)', nestedLessons.filter(e => !lawSeason(e.events.time_period)).length, 0)
+check('lessons = Σ CMC quarter length over lesson enrollments (nested join)',
+  r.privateLessons.lessons, nestedLessons.reduce((a, e) => a + (LAW_WEEKS[lawSeason(e.events.time_period)] ?? 0), 0))
+check('ASAP meetings reference column = Σ All Meetings (nested join)',
+  r.privateLessons.asapMeetings, nestedLessons.reduce((a, e) => a + (e.events.all_meetings ?? 0), 0))
+const lessonsBySeason = {}
+for (const e of nestedLessons) { const s = lawSeason(e.events.time_period); lessonsBySeason[s] = (lessonsBySeason[s] ?? 0) + 1 }
+for (const [s, n] of Object.entries(lessonsBySeason)) console.log(`    ${s.padEnd(8)} ${String(n).padStart(5)} enrollments × ${LAW_WEEKS[s]} = ${n * LAW_WEEKS[s]}`)
 check('branch × quarter rows sum to the lesson total',
   r.privateLessons.byBranchQuarter.reduce((a, b) => a + b.lessons, 0), r.privateLessons.lessons)
 check('branch × quarter rows sum to lesson enrollments',

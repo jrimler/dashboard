@@ -140,19 +140,23 @@ function buildReport({ events, enrollments, birthdates, input }) {
   groupClasses.sections     = classes.length
   groupClasses.timesOffered = groupClasses.regular.timesOffered + groupClasses.camps.days
 
-  // Private lessons: every lesson enrollment times the lessons it was booked
-  // for in that quarter (ASAP's All Meetings on the lesson's event).
+  // Private lessons: every lesson enrollment times its quarter's length in
+  // weeks — how CMC has always reported this to Data Arts, so it stays
+  // consistent year to year. ASAP's All Meetings (the lessons actually booked,
+  // fewer for a mid-quarter start) is kept alongside for reference only.
   const byBranchQuarter = new Map()
-  let lessonsTotal = 0, lessonsNoMeetings = 0
+  let lessonsTotal = 0, lessonsNoQuarter = 0, asapMeetings = 0
   for (const e of lessonEnr) {
     const ev = eventsById.get(e.event_id)
-    const meetings = ev.all_meetings
-    if (meetings == null) lessonsNoMeetings++
-    lessonsTotal += meetings ?? 0
+    const weeks = quarterWeeks(ev.time_period)
+    if (weeks == null) lessonsNoQuarter++
+    lessonsTotal += weeks ?? 0
+    asapMeetings += ev.all_meetings ?? 0
     const key = `${(ev.location ?? '').trim() || '—'}|${ev.time_period ?? '—'}`
-    const b = byBranchQuarter.get(key) ?? { location: (ev.location ?? '').trim() || '—', time_period: ev.time_period ?? '—', enrollments: 0, lessons: 0, start: null }
+    const b = byBranchQuarter.get(key) ?? { location: (ev.location ?? '').trim() || '—', time_period: ev.time_period ?? '—', weeks, enrollments: 0, lessons: 0, asapMeetings: 0, start: null }
     b.enrollments++
-    b.lessons += meetings ?? 0
+    b.lessons += weeks ?? 0
+    b.asapMeetings += ev.all_meetings ?? 0
     const start = classStartDate(ev.class_start_date)
     if (start && (!b.start || start < b.start)) b.start = start
     byBranchQuarter.set(key, b)
@@ -160,7 +164,8 @@ function buildReport({ events, enrollments, birthdates, input }) {
   const privateLessons = {
     enrollments: lessonEnr.length,
     lessons:     lessonsTotal,
-    noMeetings:  lessonsNoMeetings,
+    noQuarter:   lessonsNoQuarter,
+    asapMeetings,
     byBranchQuarter: [...byBranchQuarter.values()]
       .sort((a, b) => a.location.localeCompare(b.location) || (a.start ?? '').localeCompare(b.start ?? '')),
   }
@@ -243,7 +248,7 @@ function reportSections(r) {
       id: 'lessons', title: 'Number of Private Lessons',
       rows: [
         { label: 'Private lessons', value: r.privateLessons.lessons, source: 'ASAP', top: true,
-          note: r.privateLessons.noMeetings ? `${r.privateLessons.noMeetings} enrollment(s) have no lesson count in ASAP and add 0` : null },
+          note: r.privateLessons.noQuarter ? `${r.privateLessons.noQuarter} enrollment(s) have no recognisable quarter and add 0` : null },
         { label: 'Private lesson enrollments', value: r.privateLessons.enrollments, source: 'ASAP' },
       ],
     },
@@ -299,8 +304,8 @@ function exportCSV(sections, report, fy) {
     for (const r of s.rows) rows.push([s.title, r.top ? r.label : `  ${r.label}`, r.value ?? '', r.source, r.note ?? ''])
   }
   rows.push([])
-  rows.push(['Private lessons by branch and quarter', 'Branch', 'Quarter', 'Enrollments', 'Lessons'])
-  for (const b of report.privateLessons.byBranchQuarter) rows.push(['', b.location, b.time_period, b.enrollments, b.lessons])
+  rows.push(['Private lessons by branch and quarter', 'Branch', 'Quarter', 'Enrollments', 'Weeks', 'Lessons', 'ASAP meetings (reference)'])
+  for (const b of report.privateLessons.byBranchQuarter) rows.push(['', b.location, b.time_period, b.enrollments, b.weeks ?? '', b.lessons, b.asapMeetings])
   rows.push([])
   rows.push(['Group classes by quarter', 'Quarter', 'Sections', 'Weeks', 'Times offered'])
   for (const q of report.groupClasses.regular.byQuarter) rows.push(['', q.time_period, q.sections, q.weeks ?? '', q.timesOffered])
@@ -515,12 +520,18 @@ export default function DataArtsReport() {
 
             <div className="ugcb-info-section-title">Number of Private Lessons</div>
             <p>
-              Each private lesson enrollment times the lessons booked for it that quarter
-              (ASAP's <em>All Meetings</em> on the lesson). This is the actual count per student,
-              so a student who started mid-quarter adds fewer lessons. A teacher with 10 students
-              at 14 lessons in Fall, 12 in Winter, 10 in Spring and 8 in Summer adds 440. The
-              branch × quarter breakdown under <em>Details</em> shows how the total builds up.
-              The few lessons ASAP has no count for are named in a note and add 0.
+              Each private lesson enrollment times its quarter's length in weeks, the same fixed
+              lengths as group classes: Fall {QUARTER_WEEKS.Fall}, Winter {QUARTER_WEEKS.Winter},
+              Spring {QUARTER_WEEKS.Spring}, Summer {QUARTER_WEEKS.Summer}. This is how CMC has
+              always reported lessons to Data Arts, so the figure stays comparable from year to
+              year. A student who started mid-quarter still counts the full quarter. A teacher
+              with 10 students in every quarter adds 10 × ({QUARTER_WEEKS.Fall} +{' '}
+              {QUARTER_WEEKS.Winter} + {QUARTER_WEEKS.Spring} + {QUARTER_WEEKS.Summer}) ={' '}
+              {10 * (QUARTER_WEEKS.Fall + QUARTER_WEEKS.Winter + QUARTER_WEEKS.Spring + QUARTER_WEEKS.Summer)}.
+              The quarter comes from ASAP's Time Period. The branch × quarter breakdown under{' '}
+              <em>Details</em> shows how the total builds up, with ASAP's own count of lessons
+              booked (<em>All Meetings</em>) beside it for reference. That column isn't used in
+              the report.
             </p>
 
             <div className="ugcb-info-section-title">Attendance / Participation (all ages)</div>
@@ -642,7 +653,9 @@ function Details({ report }) {
             <tr>
               <th className="rt-label-hdr">Private lessons — branch · quarter</th>
               <th className="rt-period-hdr">Enrollments</th>
+              <th className="rt-period-hdr">Weeks</th>
               <th className="rt-period-hdr">Lessons</th>
+              <th className="rt-period-hdr">ASAP meetings (reference)</th>
             </tr>
           </thead>
           <tbody>
@@ -650,13 +663,17 @@ function Details({ report }) {
               <tr key={`${b.location}|${b.time_period}`} className="rt-row rt-sub-row">
                 <td className="rt-label">{b.location} · {b.time_period}</td>
                 <td className="rt-period-cell">{b.enrollments.toLocaleString()}</td>
+                <td className="rt-period-cell">{b.weeks ?? '—'}</td>
                 <td className="rt-period-cell">{b.lessons.toLocaleString()}</td>
+                <td className="rt-period-cell">{b.asapMeetings.toLocaleString()}</td>
               </tr>
             ))}
             <tr className="rt-row rt-top-row">
               <td className="rt-label">Total</td>
               <td className="rt-period-cell">{pl.enrollments.toLocaleString()}</td>
+              <td className="rt-period-cell"></td>
               <td className="rt-period-cell">{pl.lessons.toLocaleString()}</td>
+              <td className="rt-period-cell">{pl.asapMeetings.toLocaleString()}</td>
             </tr>
           </tbody>
         </table>
