@@ -39,27 +39,32 @@ function ageAtDate(birthdateStr, referenceDateStr) {
   return age < 0 || age > MAX_PLAUSIBLE_AGE ? null : age
 }
 
-// Splits one fiscal year's CMC students by age. Each unique student is aged at
-// the start of their earliest class in the year, the same convention as the
-// Demographics report, so someone who turns 19 mid-year still counts as 18 and
-// under. No birthdate, a placeholder one, or no real start date → unknown.
-function studentAges(enrollments, eventsById, birthdates) {
-  const earliest = new Map()   // customer_id → earliest real class start date
-  for (const e of enrollments) {
-    if (!e.customer_id) continue
-    const start = classStartDate(eventsById.get(e.event_id)?.class_start_date)
-    const cur = earliest.get(e.customer_id)
-    if (!earliest.has(e.customer_id)) earliest.set(e.customer_id, start)
-    else if (start && (!cur || start < cur)) earliest.set(e.customer_id, start)
+// The fiscal year's first day: the earliest real start date of any lesson or
+// class in it. Not a fixed July 1 — Summer sections start in mid-June and
+// still belong to the next FY (FY26 opens 2025-06-16 with Camp CMC).
+function fiscalYearStart(events) {
+  let first = null
+  for (const ev of events) {
+    const start = classStartDate(ev.class_start_date)
+    if (start && (!first || start < first)) first = start
   }
+  return first
+}
+
+// Splits one fiscal year's CMC students by age. A student counts as 18 and
+// under if they were 18 or younger at any point in the year, which is the same
+// as being 18 or younger on its first day. No birthdate or a placeholder one →
+// unknown.
+function studentAges(enrollments, birthdates, yearStart) {
+  const students = new Set(enrollments.map(e => e.customer_id).filter(Boolean))
   let youth = 0, older = 0, unknown = 0
-  for (const [cid, start] of earliest) {
-    const age = ageAtDate(birthdates.get(cid) ?? null, start)
+  for (const cid of students) {
+    const age = ageAtDate(birthdates.get(cid) ?? null, yearStart)
     if (age === null) unknown++
     else if (age <= YOUTH_MAX_AGE) youth++
     else older++
   }
-  return { total: earliest.size, youth, older, unknown }
+  return { total: students.size, youth, older, unknown, yearStart }
 }
 
 function sum(values) { return values.reduce((a, b) => a + b, 0) }
@@ -187,7 +192,7 @@ function buildReport({ events, enrollments, birthdates, input }) {
 
   // Attendees 18 and under: CMC students 18 and under + partner students +
   // 60% of all audience members, rounded to a whole person.
-  const ages = studentAges(enrollments, eventsById, birthdates)
+  const ages = studentAges(enrollments, birthdates, fiscalYearStart(events))
   const audienceCombined = sumIfComplete([val('paid_audience'), val('free_audience')])
   const audienceYouth    = audienceCombined == null ? null : Math.round(audienceCombined * AUDIENCE_YOUTH_SHARE)
   const youth = {
@@ -271,7 +276,10 @@ function reportSections(r) {
         { label: 'Attendees 18 and under', value: r.youth.total, source: 'Combined', top: true,
           note: r.youth.total == null ? NEEDS_INPUT : null },
         { label: 'CMC students 18 and under', value: r.youth.cmcStudents, source: 'ASAP',
-          note: r.youth.ages.unknown ? `${r.youth.ages.unknown} of ${r.youth.ages.total} students have no usable birthdate and aren't counted` : null },
+          note: [
+            r.youth.ages.yearStart ? `Aged on ${r.youth.ages.yearStart}, the year's first class or lesson` : 'no class or lesson in the year has a usable start date',
+            r.youth.ages.unknown ? `${r.youth.ages.unknown} of ${r.youth.ages.total} students have no usable birthdate and aren't counted` : null,
+          ].filter(Boolean).join('; ') },
         inputRow('Partner program students', r.youth.partnerStudents),
         { label: `Audience estimate (${AUDIENCE_YOUTH_SHARE * 100}% of ${r.youth.audienceCombined == null ? 'paid + free' : r.youth.audienceCombined.toLocaleString()})`,
           value: r.youth.audienceYouth, source: 'Data Arts Input',
@@ -554,10 +562,13 @@ export default function DataArtsReport() {
             </p>
             <ul>
               <li><strong>CMC students 18 and under</strong>: <em>unique</em> students enrolled in
-                the year, each aged at the start date of their earliest class that year (the
-                Demographics report's convention), so a student who turns 19 mid-year still counts.
-                Students with no birthdate, ASAP's 1900-01-01 placeholder, or an age outside 0–100
-                can't be aged and aren't counted. The note on that row gives how many.</li>
+                the year who were 18 or younger at any point during it. That's the same as being
+                18 or younger on the year's first day, so everyone is aged on one date: the
+                earliest start date of any lesson or class in the year (FY26: June 16, 2025, when
+                Camp CMC began). A student who turns 19 at any point in the year still counts,
+                wherever their own classes fall. The note on that row names the date used. Students
+                with no birthdate, ASAP's 1900-01-01 placeholder, or an age outside 0–100 can't be
+                aged and aren't counted. The note also gives how many.</li>
               <li><strong>Partner program students</strong> from Data Arts Input, all of them.</li>
               <li><strong>Audience estimate</strong>: paid + free audience × 60%, CMC's estimate
                 of the share of its audiences that are under 18, rounded to a whole person.</li>

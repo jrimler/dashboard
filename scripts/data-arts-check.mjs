@@ -148,6 +148,25 @@ const a = r.youth.ages
 check('18 and under + 19 and over + unknown = unique students', a.youth + a.older + a.unknown, a.total)
 check('unique students (nested join)', a.total, new Set(nested.map(e => e.customer_id).filter(Boolean)).size)
 check('every enrolled student has a students row', students.length, a.total)
+// "18 or under at any point in the year" restated as a birthday test: the
+// student's 19th birthday falls after the year's first day. Placeholder and
+// out-of-range birthdates are excluded the same way, by year.
+const firstDay = events.map(e => e.class_start_date).filter(d => d && d >= '2015' && d < '2040').sort()[0]
+check('year start = earliest start date in the year (raw)', a.yearStart, firstDay)
+const fdYear = Number(firstDay.slice(0, 4))
+const plausible = b => b && fdYear - Number(b.slice(0, 4)) <= 101 && b <= firstDay
+const nineteenth = b => `${Number(b.slice(0, 4)) + 19}${b.slice(4)}`
+const withBirthdate = students.filter(s => plausible(s.birthdate))
+check('18 and under = students whose 19th birthday is after the first day',
+  a.youth, withBirthdate.filter(s => nineteenth(s.birthdate) > firstDay).length)
+check('18 and under + 19 and over = students with a plausible birthdate', a.youth + a.older, withBirthdate.length)
+// Boundary: a student turning 19 the day after the year starts counts; one who
+// turned 19 on the first day does not.
+const dayAfter = new Date(Date.parse(firstDay) + 864e5).toISOString().slice(0, 10)
+const probe = bd => buildReport({ events, enrollments: [{ event_enrollment_id: 'x', event_id: events[0].event_id, customer_id: 'p' }],
+  birthdates: new Map([['p', bd]]), input: null }).youth.ages.youth
+check(`turns 19 on ${dayAfter} (day after year start) → counted`, probe(`${Number(dayAfter.slice(0, 4)) - 19}${dayAfter.slice(4)}`), 1)
+check(`turned 19 on ${firstDay} (year start) → not counted`, probe(`${fdYear - 19}${firstDay.slice(4)}`), 0)
 
 // ─── 6. Data Arts Input arithmetic, with a synthetic input row ─────────────
 // The live table may be empty, so the combining rules are exercised with known
