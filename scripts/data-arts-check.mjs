@@ -138,10 +138,21 @@ check('branch × quarter rows sum to lesson enrollments',
   r.privateLessons.byBranchQuarter.reduce((a, b) => a + b.enrollments, 0), r.privateLessons.enrollments)
 
 console.log('\n=== 4. Participation ===')
-check('tuition-free + fee-based + unclassified = all enrollments',
-  r.participation.tuitionFree + r.participation.feeBased + r.participation.unclassified, enrollments.length)
-check('tuition-free = (amount − discount) ≤ 15, recomputed from raw amounts',
-  r.participation.tuitionFree, nested.filter(e => (Number(e.amount) || 0) - (Number(e.total_discount) || 0) <= 15).length)
+// Unique students, from the nested fetch's raw amounts rather than the stored
+// is_tuition_free flag: tuition-free = any enrollment costing $15 or less after
+// discounts, fee-based = any costing more. A student can be in both.
+const net = e => (Number(e.amount) || 0) - (Number(e.total_discount) || 0)
+const rawFree = new Set(nested.filter(e => e.customer_id && net(e) <= 15).map(e => e.customer_id))
+const rawFee  = new Set(nested.filter(e => e.customer_id && net(e) > 15).map(e => e.customer_id))
+const rawAll  = new Set(nested.map(e => e.customer_id).filter(Boolean))
+const rawBoth = [...rawFree].filter(id => rawFee.has(id)).length
+check('tuition-free students = students with any enrollment ≤ $15 net (raw amounts)', r.participation.tuitionFree, rawFree.size)
+check('paid students = students with any enrollment > $15 net (raw amounts)', r.participation.feeBased, rawFee.size)
+check('students in both (raw amounts)', r.participation.both, rawBoth)
+check('free only + paid only + both + neither = unique students',
+  (r.participation.tuitionFree - r.participation.both) + (r.participation.feeBased - r.participation.both) + r.participation.both + r.participation.unclassified,
+  rawAll.size)
+console.log(`  enrollment-level for reference:${nested.filter(e => net(e) <= 15).length} tuition-free, ${nested.filter(e => net(e) > 15).length} paid`)
 
 console.log('\n=== 5. Students 18 and under ===')
 const a = r.youth.ages
@@ -175,7 +186,7 @@ console.log('\n=== 6. Combining with Data Arts Input (synthetic row) ===')
 const sample = { partner_schools: 12, partner_classes: 30, partner_times_offered: 600, partner_students: 750,
   partner_instruction_hours: 412.5, paid_audience: 1800, free_audience: 2201 }
 const s = buildReport({ events, enrollments, birthdates, input: sample })
-check('free students = tuition-free enrollments + partner students', s.participation.freeStudents, r.participation.tuitionFree + 750)
+check('free students = tuition-free students + partner students', s.participation.freeStudents, r.participation.tuitionFree + 750)
 check('audience estimate = round(60% × (paid + free))', s.youth.audienceYouth, Math.round(AUDIENCE_YOUTH_SHARE * 4001))
 check('attendees 18 and under = students ≤18 + partner students + audience estimate', s.youth.total, a.youth + 750 + Math.round(0.6 * 4001))
 check('partner hours passed through unrounded', s.partner.partner_instruction_hours, 412.5)

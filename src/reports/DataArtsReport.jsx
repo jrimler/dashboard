@@ -175,17 +175,30 @@ function buildReport({ events, enrollments, birthdates, input }) {
       .sort((a, b) => a.location.localeCompare(b.location) || (a.start ?? '').localeCompare(b.start ?? '')),
   }
 
-  // Attendance / participation, all ages. Enrollments, not unique students.
-  const tuitionFree = enrollments.filter(e => e.is_tuition_free === true).length
-  const feeBased    = enrollments.filter(e => e.is_tuition_free === false).length
+  // Attendance / participation, all ages, in unique students. A student with
+  // any tuition-free lesson or class in the year counts as tuition-free, and
+  // one with any fee-based enrollment as fee-based, so a student with both
+  // counts in both rows — CMC's rule, not a double count to correct.
+  const freeIds = new Set(), feeIds = new Set(), allIds = new Set()
+  for (const e of enrollments) {
+    if (!e.customer_id) continue
+    allIds.add(e.customer_id)
+    if (e.is_tuition_free === true)  freeIds.add(e.customer_id)
+    if (e.is_tuition_free === false) feeIds.add(e.customer_id)
+  }
+  const tuitionFree = freeIds.size
+  const feeBased    = feeIds.size
+  const both        = [...freeIds].filter(id => feeIds.has(id)).length
   const val = key => (input?.[key] == null ? null : Number(input[key]))
   const participation = {
     tuitionFree,
     feeBased,
-    unclassified: enrollments.length - tuitionFree - feeBased,
+    both,
+    // Students whose every enrollment lacks a tuition status are in neither row.
+    unclassified: allIds.size - (tuitionFree + feeBased - both),
     partnerStudents: val('partner_students'),
     freeStudents:    sumIfComplete([tuitionFree, val('partner_students')]),
-    paidEnrollments: feeBased,
+    paidStudents:    feeBased,
     freeAudience:    val('free_audience'),
     paidAudience:    val('paid_audience'),
   }
@@ -262,10 +275,13 @@ function reportSections(r) {
       rows: [
         { label: 'Free students', value: r.participation.freeStudents, source: 'Combined', top: true,
           note: r.participation.freeStudents == null ? NEEDS_INPUT : null },
-        { label: 'Tuition-free enrollments at CMC', value: r.participation.tuitionFree, source: 'ASAP' },
+        { label: 'Tuition-free students at CMC', value: r.participation.tuitionFree, source: 'ASAP' },
         inputRow('Partner program students', r.participation.partnerStudents),
-        { label: 'Paid enrollments at CMC', value: r.participation.paidEnrollments, source: 'ASAP', top: true,
-          note: r.participation.unclassified ? `${r.participation.unclassified} enrollment(s) have no tuition status and are in neither row` : null },
+        { label: 'Paid students at CMC', value: r.participation.paidStudents, source: 'ASAP', top: true,
+          note: [
+            r.participation.both ? `${r.participation.both.toLocaleString()} student(s) had both tuition-free and paid enrollments and count in both` : null,
+            r.participation.unclassified ? `${r.participation.unclassified} student(s) have no tuition status on any enrollment and are in neither row` : null,
+          ].filter(Boolean).join('; ') || null },
         { ...inputRow('Free audience', r.participation.freeAudience), top: true },
         { ...inputRow('Paid audience', r.participation.paidAudience), top: true },
       ],
@@ -544,16 +560,23 @@ export default function DataArtsReport() {
 
             <div className="ugcb-info-section-title">Attendance / Participation (all ages)</div>
             <ul>
-              <li><strong>Free students</strong> = every tuition-free enrollment at CMC + the
-                partner program students from Data Arts Input. Tuition-free means the enrollment
-                cost $15 or less after discounts, the same rule the Enrollment page uses.</li>
-              <li><strong>Paid enrollments at CMC</strong> = every fee-based enrollment.</li>
+              <li><strong>Free students</strong> = CMC's tuition-free students + the partner
+                program students from Data Arts Input.</li>
+              <li><strong>Tuition-free students at CMC</strong>: every unique student with at least
+                one tuition-free lesson, class or camp in the year. Tuition-free means the
+                enrollment cost $15 or less after discounts, the same rule the Enrollment page
+                uses, so a $15 invoice is tuition-free.</li>
+              <li><strong>Paid students at CMC</strong>: every unique student with at least one
+                fee-based enrollment in the year.</li>
               <li><strong>Free audience</strong> and <strong>paid audience</strong>: from Data Arts
                 Input.</li>
             </ul>
             <p>
-              CMC figures here are <strong>enrollments</strong>, not unique students: a student in
-              three classes counts three times. Tuition-free + paid = every enrollment in the year.
+              CMC figures here are <strong>unique students</strong>, not enrollments: a student in
+              three tuition-free classes counts once. A student with both a tuition-free and a paid
+              enrollment, such as a free group class and a paid lesson, counts once in{' '}
+              <em>each</em> row. That's intended, so tuition-free + paid can be more than the
+              year's unique students. The note on the paid row gives how many students are in both.
             </p>
 
             <div className="ugcb-info-section-title">Number of Attendees (18 and under)</div>
