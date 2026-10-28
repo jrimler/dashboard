@@ -112,7 +112,7 @@ Primary key: `event_enrollment_id` (join of REGULAR + SUPER)
 | `instructor_name` | text | "Last, First" from REGULAR |
 
 ### `upload_log`
-Primary key: `id` (identity). One row per completed upload run — added in migration 004. RLS enabled in migration 006 (select/insert policies for `authenticated`; anon has no grant and no policy), after Supabase's linter flagged it in October 2026. Migration 006 is applied by hand in the SQL editor; until it is, the table works as before and the linter keeps flagging it.
+Primary key: `id` (identity). One row per completed upload run — added in migration 004. RLS enabled in migration 006 (select/insert policies for `authenticated`; anon has no grant and no policy), after Supabase's linter flagged it in October 2026. Migration 006 has been applied (October 2026).
 
 | Field | Type | Notes |
 |---|---|---|
