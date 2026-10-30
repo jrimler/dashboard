@@ -10,7 +10,7 @@ import { dirname, resolve, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { sb } from './db.mjs'
 import { fetchAll, fetchByIds } from '../src/utils/fetchAll.js'
-import { loadDataArtsInput } from '../src/utils/dataArtsInput.js'
+import { loadDataArtsInput, dataArtsYearsThrough } from '../src/utils/dataArtsInput.js'
 
 const FY = process.argv[2] ?? 'FY26'
 
@@ -83,7 +83,14 @@ for (let from = 0; ; from += 1000) {
 }
 const classEvents = events.filter(e => e.activity_type === 'CLASS')
 
-console.log('=== 1. Online vs physical ===')
+console.log('=== 0. The year itself ===')
+check('this year is offered by the report and input form', dataArtsYearsThrough(FY).includes(FY), true)
+// The report throws on these rather than undercounting, so a year with any
+// can't be opened at all.
+const eventIds = new Set(events.map(e => e.event_id))
+check('every enrollment points at an event in this FY', enrollments.filter(e => !eventIds.has(e.event_id)).length, 0)
+
+console.log('\n=== 1. Online vs physical ===')
 check('online + on-site lesson enrollments = all lesson enrollments',
   r.online.lessons.online + r.online.lessons.onsite, nested.filter(e => e.events?.activity_type === 'LESSON').length)
 check('online lesson enrollments = stored is_virtual flag (set on upload from facility)',

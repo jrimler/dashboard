@@ -11,8 +11,8 @@
 
 export const DATA_ARTS_TABLE = 'data_arts_input'
 
-// The Data Arts Report starts with FY26; earlier years are never run.
-export const FIRST_DATA_ARTS_FY = 'FY26'
+// The Data Arts Report starts with FY25; earlier years are never run.
+export const FIRST_DATA_ARTS_FY = 'FY25'
 
 export const DATA_ARTS_FIELDS = [
   { key: 'partner_schools',           group: 'partner',  label: 'Number of schools',             help: 'Schools and other sites hosting a CMC partner program.' },

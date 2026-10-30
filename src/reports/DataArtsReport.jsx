@@ -394,7 +394,7 @@ export default function DataArtsReport() {
   // otherwise lets a slower, older year overwrite the one now selected.
   const loadSeq = useRef(0)
 
-  // Phase 1: FY26 through the newest fiscal year on file. One row, not a scan
+  // Phase 1: FY25 through the newest fiscal year on file. One row, not a scan
   // of every event.
   useEffect(() => {
     (async () => {
@@ -474,7 +474,7 @@ export default function DataArtsReport() {
             <div className="ugcb-info-section-title">What this report is for</div>
             <p>
               The figures CMC submits each year to <strong>Data Arts</strong>, one fiscal year at a
-              time. It is never run by quarter or for several years combined. It starts with FY26.
+              time. It is never run by quarter or for several years combined. It starts with FY25.
               A fiscal year runs Summer → Fall → Winter → Spring (FY26 = Summer 2025 – Spring 2026),
               and every ASAP record is assigned to a year by ASAP's own Fiscal Year column.
             </p>
@@ -523,14 +523,17 @@ export default function DataArtsReport() {
               {QUARTER_WEEKS.Winter} + {QUARTER_WEEKS.Spring} ={' '}
               {QUARTER_WEEKS.Fall + QUARTER_WEEKS.Winter + QUARTER_WEEKS.Spring} times offered.
               Two summer sections of Intro to Piano give 2 classes and {2 * QUARTER_WEEKS.Summer}.
+              A section that meets for only part of its quarter still counts the full length, so
+              a four-meeting FY25 summer ensemble counts {QUARTER_WEEKS.Summer}.
               The quarter comes from ASAP's Time Period. <em>Details</em> shows each quarter's
               sections × weeks.
             </p>
             <p>
               <strong>Camps</strong> count the <em>days</em> they ran instead. A camp is any group
               class (a CLASS in ASAP) whose start and end dates are no more than{' '}
-              {CAMP_MAX_DAYS} days apart, counting both ends, whatever it's called. Term-length
-              classes all run over a month, so nothing else comes close. This means a short
+              {CAMP_MAX_DAYS} days apart, counting both ends, whatever it's called. The shortest
+              regular classes are a few FY25 summer ensembles at 22 days, so nothing else comes
+              close. This means a short
               workshop such as the Fri–Sun CMC Summer Jazz Workshop is a camp. A camp's days are
               ASAP's meeting count or the number of weekdays (Mon–Fri) from start to end,
               whichever is higher. A Mon–Fri camp is 5, and the Fri–Sun workshop is 3. Neither

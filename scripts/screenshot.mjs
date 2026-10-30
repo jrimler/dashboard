@@ -152,10 +152,10 @@ console.log(`Navigating to ${route}…`)
 const t0 = Date.now()
 await navigateInApp(route)
 
-// The Data Arts Report shows nothing until a year is picked; FY26 is the first
+// The Data Arts Report shows nothing until a year is picked; FY25 is the first
 // year it reports, and Details holds the lesson and camp tables.
 if (route.includes('/reports/data-arts')) {
-  await page.click('.period-pill >> text="FY26"')
+  await page.click('.period-pill >> text="FY25"')
   await page.waitForSelector('.liyp-group-card', { timeout: 90000 })
   await page.click('text=/^Details/')
 }
